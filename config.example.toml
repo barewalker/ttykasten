@@ -1,0 +1,88 @@
+# ttykasten config file. Put it at ~/.config/ttykasten/config.toml
+# ($TTYKASTEN_CONFIG or $XDG_CONFIG_HOME change the location).
+#
+# It is read on every start, so edits take effect at once (no rebuild).
+# Anything left out takes the default shown here. The defaults are
+# fzfkasten.nvim's, so to use one collection from both tools, write the same
+# values as in your Neovim setup(). Unknown keys are errors, so typos show up.
+
+# Language of messages: "en" or "ja". Day and month names written into notes
+# (%A, %B) are always English.
+language = "en"
+
+# Where the notes live. Unset: $ZETTELKASTEN_HOME, else ~/notes.
+# $TTYKASTEN_HOME, when set, overrides everything (handy for trying things out).
+# home = "~/zettelkasten"
+
+extension = "md"
+
+# strftime format of {{hdate}}.
+hdate_format = "%B %d, %Y"
+
+# Template for new notes (inside home/templates/). Unset: just "# Title".
+# new_note_template = "templates/template_new_note.md"
+
+# Editor that opens notes. Unset: $EDITOR, else nvim.
+# editor = "nvim"
+
+[notes.daily]
+dir = "daily"
+format = "%Y-%m-%d"
+template = "daily.md"
+lookback_days = 30      # days listed by `log`
+
+[notes.weekly]
+dir = "weekly"
+format = "%G-W%V"       # %G is the ISO week-based year
+template = "weekly.md"
+lookback_weeks = 8      # weeks listed by `log`
+
+[tasks]
+# Tag added to captured tasks (without the #). Unset: no tag is added.
+# require_tag = "todo"
+# Where tasks are captured. Unset: the first entry of `always`. With neither,
+# `capture` refuses.
+# capture_note = "tasks/active.md"
+always = []
+new_checkbox = "- [ ] "
+
+[block_id]
+length = 6
+alphabet = "abcdefghijklmnopqrstuvwxyz0123456789"
+on_capture = false      # give captured tasks a ^id
+
+[log]
+day_label = "%Y-%m-%d (%a)"
+week_label = "%G-W%V"
+
+[fzf]
+command = "fzf"
+opts = []               # extra arguments for every fzf, e.g. ["--border", "--height=60%"]
+preview = true          # show the note next to the list
+
+# Colours are SGR parameters ("1;34" is bold blue). "" turns colouring off.
+[preview.colors]
+heading = "1;34"
+tag = "36"
+link = "4;34"
+open = "33"
+done = "32"
+priority = "1;33"
+due = "31"
+dim = "2"
+cancelled = "2;9"
+
+# The menu shown when ttykasten runs with no arguments. Unset: every action,
+# in the default order. Set: only the items written, in the order written.
+#   action   a ttykasten action: daily weekly capture find new log
+#   command  a shell command to run instead (sh -c, in home)
+#   key      a hint shown in the list; `ttykasten <key>` also runs the item
+#   label    the description; unset uses the language's default
+#
+# [[menu.items]]
+# action = "daily"
+# key = "kd"
+#
+# [[menu.items]]
+# label = "git status"
+# command = "git status; read -r _"

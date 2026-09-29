@@ -1,0 +1,27 @@
+[package]
+name = "ttykasten"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.88"
+description = "Zettelkasten notes and tasks from the terminal, byte-compatible with fzfkasten.nvim."
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/barewalker/ttykasten"
+readme = "README.md"
+keywords = ["zettelkasten", "notes", "tasks", "fzf", "terminal"]
+categories = ["command-line-utilities"]
+
+# The format logic (lib) is kept apart from the part that runs fzf and the editor (bin).
+[lib]
+name = "ttykasten"
+path = "src/lib.rs"
+
+[[bin]]
+name = "ttykasten"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = "1.0.104"
+# Day and month names are always English (format.md Q2); chrono's %A %B %a are English.
+chrono = { version = "0.4.45", default-features = false, features = ["clock", "std"] }
+serde = { version = "1.0.229", features = ["derive"] }
+toml = "1.1.6"
