@@ -54,6 +54,27 @@ lookback_weeks = 8      # weeks listed by `log`
 # capture_note = "tasks/active.md"
 always = []
 new_checkbox = "- [ ] "
+# "all": any line outside frontmatter, fences and headings can hold a task.
+# "headings": only lines under a heading matching one of `headings` (regexes
+# on the heading's trimmed, lowercased text).
+scope = "all"
+headings = ['^tasks?([^A-Za-z]|$)', '^to-?dos?([^A-Za-z]|$)', '^タスク', '^やること']
+# Untagged checkboxes (the inbox) in notes older than this many days are left
+# out. Unset: no limit. Tagged tasks never age out, nor do notes in `always`.
+# since_days = 60
+# How a note is dated: first `date_patterns` (regexes tried on its first
+# `date_lines` lines; the first YYYY-MM-DD in the match, or in its first group,
+# counts), then the first YYYY-MM-DD in the file name, then these frontmatter
+# keys. The plugin's `tasks.date` hook is a Lua function; this is its
+# counterpart. Example: date_patterns = ['^\*\*Created\*\*:\s*(\d{4}-\d{2}-\d{2})']
+date_patterns = []
+date_lines = 10
+date_keys = ["date", "created"]
+sort = "priority"       # the task list's order: "priority", "due" or "added"
+
+[tasks.ignore]
+frontmatter_key = "tasks"   # `tasks: false` (or no / off) opts a note out
+dirs = ["templates"]
 
 [block_id]
 length = 6
@@ -87,8 +108,8 @@ mark = "7"              # the picked line in `link` and `backlinks`
 
 # The menu shown when ttykasten runs with no arguments. Unset: every action,
 # in the default order. Set: only the items written, in the order written.
-#   action   a ttykasten action: daily weekly capture find new log
-#            link link-daily backlinks
+#   action   a ttykasten action: daily weekly capture tasks inbox find new
+#            log link link-daily backlinks
 #   command  a shell command to run instead (sh -c, in home)
 #   key      a hint shown in the list; `ttykasten <key>` also runs the item
 #   label    the description; unset uses the language's default

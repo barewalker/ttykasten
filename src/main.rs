@@ -17,6 +17,7 @@ use chrono::{Local, NaiveDate, NaiveDateTime};
 use ttykasten::config::{self, Config, MenuItem};
 use ttykasten::i18n::{Msgs, fill};
 use ttykasten::note::{self, Periodic};
+use ttykasten::tasks::{self, Scanner, Sort, Want};
 use ttykasten::{blockid, fileio, link, preview, task, template, trim};
 
 fn main() -> ExitCode {
@@ -62,6 +63,12 @@ fn run() -> Result<()> {
         let line = rest.get(1).and_then(|l| l.parse::<usize>().ok());
         return app.preview(rest.first().map(String::as_str).unwrap_or(""), line);
     }
+    match cmd {
+        // Called by fzf to fill and re-sort the task list.
+        "task-lines" => return app.print_task_lines(rest.first().map(String::as_str), rest.get(1).map(String::as_str)),
+        "task-sort-next" => return app.print_sort_next(rest.first().map(String::as_str)),
+        _ => {}
+    }
     let arg = (!rest.is_empty()).then(|| rest.join(" "));
     app.dispatch(cmd, arg)
 }
@@ -76,6 +83,8 @@ impl App {
             "find" => self.find(),
             "new" => self.new_note(arg),
             "log" => self.log(),
+            "tasks" => self.task_list(false),
+            "inbox" => self.task_list(true),
             "link" => self.link(),
             "link-daily" => self.link_daily(),
             "backlinks" => self.backlinks(),
@@ -317,6 +326,128 @@ impl App {
             Some(rel) if !rel.is_empty() => self.edit(&self.home.join(rel)),
             _ => Ok(()),
         }
+    }
+
+    /// The task list or the inbox in fzf (§8). Enter opens the note at the
+    /// task's line; alt-s cycles the order.
+    fn task_list(&self, inbox: bool) -> Result<()> {
+        let kind = if inbox { "inbox" } else { "tasks" };
+        let sort = Sort::parse(&self.cfg.tasks.sort);
+        let lines = self.task_lines(inbox, sort)?;
+        let exe = self.self_command()?;
+        let mut args = vec![
+            "--delimiter=\t".to_string(),
+            "--with-nth=3..".into(),
+            "--ansi".into(),
+            "--no-sort".into(),
+            format!("--prompt={}", self.sort_prompt(inbox, sort)),
+            format!("--header={}", self.msg.tasks_header),
+            "--preview-window=+{2}-/2".into(),
+            format!("--bind=alt-s:transform:{exe} task-sort-next {kind}"),
+        ];
+        args.extend(self.preview_arg("{1} {2}")?);
+        let args: Vec<&str> = args.iter().map(String::as_str).collect();
+        let Some(out) = self.fzf(&lines, &args)? else {
+            return Ok(());
+        };
+        let mut fields = out.first().map(|l| l.split('\t')).into_iter().flatten();
+        match (fields.next(), fields.next().and_then(|n| n.parse::<usize>().ok())) {
+            (Some(rel), Some(lineno)) => self.edit_at(&self.home.join(rel), lineno),
+            _ => Ok(()),
+        }
+    }
+
+    fn sort_prompt(&self, inbox: bool, sort: Sort) -> String {
+        let name = if inbox { self.msg.prompt_inbox } else { self.msg.prompt_tasks };
+        let by = match sort {
+            Sort::Priority => "priority",
+            Sort::Due => "due",
+            Sort::Added => "added",
+        };
+        format!("{name} [{by}]> ")
+    }
+
+    /// The list's lines for fzf: path, line number, and what is shown (the
+    /// entry, then the note and line dimmed).
+    fn task_lines(&self, inbox: bool, sort: Sort) -> Result<String> {
+        let scanner = Scanner::new(&self.cfg)
+            .map_err(|e| anyhow!(fill(self.msg.bad_pattern, &[&"tasks.date_patterns / tasks.headings", &e])))?;
+        let cutoff = self
+            .cfg
+            .tasks
+            .since_days
+            .map(|n| note::days_from(now(), -i64::from(n)).format("%Y-%m-%d").to_string());
+        let mut all = Vec::new();
+        for rel in self.checkbox_notes()? {
+            if let Ok(lines) = fileio::read_lines(&self.home.join(&rel)) {
+                scanner.scan_note(&rel, &lines, cutoff.as_deref(), &mut all);
+            }
+        }
+        let want = Want { inbox, ..Want::default() };
+        let mut out = String::new();
+        for t in tasks::select(all, want, sort) {
+            out.push_str(&format!(
+                "{}\t{}\t{}  \x1b[2m{}:{}\x1b[0m\n",
+                t.rel,
+                t.lineno,
+                scanner.entry_text(&t),
+                t.rel,
+                t.lineno
+            ));
+        }
+        Ok(out)
+    }
+
+    /// Notes that contain a checkbox, as the plugin finds them: rg honours
+    /// .gitignore here (§2.2).
+    fn checkbox_notes(&self) -> Result<Vec<String>> {
+        let glob = format!("*.{}", self.cfg.extension);
+        let out = Command::new("rg")
+            .args(["--files-with-matches", "--no-messages", "--glob", &glob])
+            .args(["-e", r"^\s*[-*]\s+\[[ xX-]\]\s+"])
+            .current_dir(&self.home)
+            .output()
+            .with_context(|| fill(self.msg.cannot_start, &[&"rg"]))?;
+        let text = String::from_utf8_lossy(&out.stdout);
+        Ok(text.lines().map(str::to_string).collect())
+    }
+
+    /// `task-lines KIND SORT`, for fzf's reload.
+    fn print_task_lines(&self, kind: Option<&str>, sort: Option<&str>) -> Result<()> {
+        let lines = self.task_lines(kind == Some("inbox"), Sort::parse(sort.unwrap_or("")))?;
+        let _ = std::io::stdout().lock().write_all(lines.as_bytes());
+        Ok(())
+    }
+
+    /// `task-sort-next KIND`: reads the current order from fzf's prompt
+    /// ($FZF_PROMPT) and prints the fzf actions that switch to the next one.
+    fn print_sort_next(&self, kind: Option<&str>) -> Result<()> {
+        let inbox = kind == Some("inbox");
+        let prompt = env::var("FZF_PROMPT").unwrap_or_default();
+        let current = prompt
+            .rsplit_once('[')
+            .and_then(|(_, r)| r.split_once(']'))
+            .map(|(s, _)| Sort::parse(s))
+            .unwrap_or(Sort::Priority);
+        let next = match current {
+            Sort::Priority => ("due", Sort::Due),
+            Sort::Due => ("added", Sort::Added),
+            Sort::Added => ("priority", Sort::Priority),
+        };
+        let exe = self.self_command()?;
+        println!(
+            "change-prompt({})+reload({exe} task-lines {} {})",
+            self.sort_prompt(inbox, next.1),
+            if inbox { "inbox" } else { "tasks" },
+            next.0
+        );
+        Ok(())
+    }
+
+    /// This executable, quoted for a shell command line.
+    fn self_command(&self) -> Result<String> {
+        let exe = env::current_exe().context("current_exe")?;
+        Ok(format!("'{}'", exe.to_string_lossy().replace('\'', r"'\''")))
     }
 
     /// Every note file, relative to home. `ignore` is rg's flag for which ignore

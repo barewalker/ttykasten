@@ -12,11 +12,13 @@ Run `ttykasten` with no arguments and every action is listed in
 ttykasten               # the menu
 ttykasten daily         # today's daily note, created from its template if missing
 ttykasten capture       # capture a one-line task (typed into an input line)
+ttykasten tasks         # the task list, read from the notes themselves
 ttykasten find          # find a note, with a coloured preview
 ttykasten link          # pick any line of any note; copy [[note#^id]]
 ```
 
-Status: an early prototype. The task list and the week digest are planned (see [docs/design.md](docs/design.md)).
+Status: an early prototype. Acting on tasks from the list (done, cancel,
+due dates) and the week digest are planned (see [docs/design.md](docs/design.md)).
 
 ## Requirements
 
@@ -38,6 +40,8 @@ cargo install --git https://github.com/barewalker/ttykasten
 | `daily` | open today's daily note, creating it from its template if missing |
 | `weekly` | open this week's weekly note (ISO week, `%G-W%V`) |
 | `capture [TEXT]` | append a task to the capture note |
+| `tasks` | the task list: open tasks carrying `require_tag`, subtasks under their parent; `alt-s` sorts by priority, due date or when added; enter opens the task's line |
+| `inbox` | checkboxes without the tag, so nothing captured is lost |
 | `find` | find a note by path and open it |
 | `new [TITLE]` | create a note from the template and open it |
 | `log` | list recent daily and weekly notes; `ctrl-x` picks a date |

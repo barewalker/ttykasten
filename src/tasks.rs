@@ -1,0 +1,704 @@
+//! Collecting tasks from the notes (§8.3–§8.7): the task list and the inbox.
+//!
+//! The notes are the only record of the tasks; there is no index. Each call
+//! reads the notes that contain a checkbox and rebuilds the list.
+
+use std::collections::HashMap;
+
+use regex::Regex;
+use unicode_width::UnicodeWidthStr;
+
+use crate::config::Config;
+use crate::{blockid, is_ws, trim};
+
+/// One checkbox found in a note.
+#[derive(Debug, Clone)]
+pub struct Task {
+    /// The task's text, without priority, stamps, ids and an outer strike.
+    pub text: String,
+    pub id: Option<String>,
+    pub done: bool,
+    pub done_at: Option<String>,
+    pub cancelled: bool,
+    pub cancelled_at: Option<String>,
+    pub priority: Option<char>,
+    pub due: Option<String>,
+    /// Path relative to home.
+    pub rel: String,
+    /// 1-based line number.
+    pub lineno: usize,
+    /// The note's date (§8.4).
+    pub date: Option<String>,
+    /// How many checkboxes this one sits inside.
+    pub depth: usize,
+    /// The task it is a subtask of, as an index into the scan.
+    pub parent: Option<usize>,
+    /// The text of the list item directly above it.
+    pub context: Option<String>,
+    pub children: usize,
+    pub children_closed: usize,
+    root_priority: Option<char>,
+    root_due: Option<String>,
+    root_lineno: usize,
+    tagged: bool,
+    aged_out: bool,
+    /// A subtask whose parent is not in the list being shown.
+    pub orphaned: bool,
+}
+
+/// What to collect.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct Want {
+    /// The untagged checkboxes (the inbox) instead of the tagged ones.
+    pub inbox: bool,
+    pub done: bool,
+    pub cancelled: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Sort {
+    Priority,
+    Due,
+    Added,
+}
+
+impl Sort {
+    pub fn parse(s: &str) -> Sort {
+        match s {
+            "due" => Sort::Due,
+            "added" => Sort::Added,
+            _ => Sort::Priority,
+        }
+    }
+}
+
+/// The compiled patterns a scan needs.
+pub struct Scanner<'a> {
+    cfg: &'a Config,
+    due: Regex,
+    done_stamp: Regex,
+    cancel_stamp: Regex,
+    date: Regex,
+    date_patterns: Vec<Regex>,
+    headings: Vec<Regex>,
+}
+
+/// Lua's `%s`, for use inside regexes.
+const WS: &str = r"[ \t\n\x0B\x0C\r]";
+
+impl<'a> Scanner<'a> {
+    pub fn new(cfg: &'a Config) -> Result<Self, regex::Error> {
+        let compile = |v: &[String]| v.iter().map(|p| Regex::new(p)).collect::<Result<Vec<_>, _>>();
+        Ok(Scanner {
+            cfg,
+            due: Regex::new(r"due:([0-9]{4}-[0-9]{2}-[0-9]{2}[T0-9:]*)")?,
+            done_stamp: Regex::new(&format!(r"{WS}*done:([0-9]{{4}}-[0-9]{{2}}-[0-9]{{2}} [0-9]{{2}}:[0-9]{{2}})"))?,
+            cancel_stamp: Regex::new(&format!(r"{WS}*cancelled:([0-9]{{4}}-[0-9]{{2}}-[0-9]{{2}})"))?,
+            date: Regex::new(r"[0-9]{4}-[0-9]{2}-[0-9]{2}")?,
+            date_patterns: compile(&cfg.tasks.date_patterns)?,
+            headings: compile(&cfg.tasks.headings)?,
+        })
+    }
+
+    /// Scans one note's lines and appends what it finds to `all`. `cutoff` is
+    /// the `since_days` limit as YYYY-MM-DD.
+    pub fn scan_note(&self, rel: &str, lines: &[String], cutoff: Option<&str>, all: &mut Vec<Task>) {
+        let t = &self.cfg.tasks;
+        if in_dirs(rel, &t.ignore.dirs) {
+            return;
+        }
+        let (fm, fm_end) = frontmatter(lines);
+        let opted_out = t
+            .ignore
+            .frontmatter_key
+            .as_ref()
+            .and_then(|k| fm.get(k.as_str()))
+            .is_some_and(|v| matches!(*v, "false" | "no" | "off"));
+        let date = self.note_date(rel, lines, &fm);
+        let aged_out = cutoff.is_some_and(|c| date.as_deref().is_some_and(|d| d < c))
+            && !t.always.iter().any(|a| a == rel);
+        // With require_tag an old note can still hold tagged tasks, so only
+        // its untagged checkboxes age out.
+        if opted_out || (aged_out && t.require_tag.is_none()) {
+            return;
+        }
+        let scannable = self.scannable(lines, fm_end);
+
+        struct Open {
+            indent: usize,
+            text: String,
+            tagged: bool,
+            depth: usize,
+            task: Option<usize>,
+            root: Option<usize>,
+        }
+        let mut stack: Vec<Open> = Vec::new();
+        for (i, line) in lines.iter().enumerate().skip(fm_end) {
+            let at_margin = line.bytes().next().is_some_and(|b| !is_ws(b));
+            if !scannable[i] {
+                // A heading, or a fence at the margin, ends the list (Q9).
+                if at_margin {
+                    stack.clear();
+                }
+                continue;
+            }
+            let item = checkbox_item(line);
+            let bullet = if item.is_none() { bullet_text(line) } else { None };
+            if item.is_none() && bullet.is_none() {
+                // A paragraph at the margin ends the list; blank lines and
+                // indented prose sit inside a loose list item.
+                if at_margin {
+                    stack.clear();
+                }
+                continue;
+            }
+            let indent = indent_width(line);
+            while stack.last().is_some_and(|o| o.indent >= indent) {
+                stack.pop();
+            }
+            let parent = stack.last();
+            let Some((kind, raw)) = item else {
+                // A bullet is never a task and never introduces the tag, but
+                // it passes down what the item above it decided.
+                let entry = Open {
+                    indent,
+                    text: bullet.unwrap_or_default().to_string(),
+                    tagged: parent.is_some_and(|p| p.tagged),
+                    depth: parent.map_or(0, |p| p.depth),
+                    task: parent.and_then(|p| p.task),
+                    root: parent.and_then(|p| p.root),
+                };
+                stack.push(entry);
+                continue;
+            };
+            let parsed = self.parse_text(raw);
+            let idx = all.len();
+            let parent_task = parent.and_then(|p| p.task);
+            let root = parent.and_then(|p| p.root).unwrap_or(idx);
+            let tagged = match &t.require_tag {
+                None => true,
+                Some(tag) => crate::task::has_tag(&parsed.text, tag) || parent.is_some_and(|p| p.tagged),
+            };
+            let (root_priority, root_due, root_lineno) = if root == idx {
+                (parsed.priority, parsed.due.clone(), i + 1)
+            } else {
+                (all[root].priority, all[root].due.clone(), all[root].lineno)
+            };
+            let depth = parent.map_or(0, |p| p.depth);
+            let context = parent.map(|p| p.text.clone());
+            if let Some(p) = parent_task {
+                all[p].children += 1;
+                if kind != Kind::Open {
+                    all[p].children_closed += 1;
+                }
+            }
+            stack.push(Open {
+                indent,
+                text: parsed.text.clone(),
+                tagged,
+                depth: depth + 1,
+                task: Some(idx),
+                root: Some(root),
+            });
+            all.push(Task {
+                text: parsed.text,
+                id: blockid::read(raw).map(str::to_string),
+                done: kind == Kind::Done,
+                done_at: parsed.done_at,
+                cancelled: kind == Kind::Cancelled,
+                cancelled_at: parsed.cancelled_at,
+                priority: parsed.priority,
+                due: parsed.due,
+                rel: rel.to_string(),
+                lineno: i + 1,
+                date: date.clone(),
+                depth,
+                parent: parent_task,
+                context,
+                children: 0,
+                children_closed: 0,
+                root_priority,
+                root_due,
+                root_lineno,
+                tagged,
+                aged_out,
+                orphaned: false,
+            });
+        }
+    }
+
+    /// Which lines can hold a task (§8.3): below the frontmatter, outside
+    /// fences, not headings, and in scope.
+    fn scannable(&self, lines: &[String], fm_end: usize) -> Vec<bool> {
+        let by_headings = self.cfg.tasks.scope == "headings";
+        let mut out = vec![false; lines.len()];
+        let mut in_scope = !by_headings;
+        let mut fence: Option<(u8, usize)> = None;
+        for (i, line) in lines.iter().enumerate().skip(fm_end) {
+            let delim = fence_delim(line);
+            if let Some((ch, len)) = fence {
+                if delim.is_some_and(|(c, l)| c == ch && l >= len) {
+                    fence = None;
+                }
+            } else if delim.is_some() {
+                fence = delim;
+            } else if let Some(heading) = heading_text(line) {
+                if by_headings {
+                    let lowered = trim(heading).to_ascii_lowercase();
+                    in_scope = self.headings.iter().any(|r| r.is_match(&lowered));
+                }
+            } else if in_scope {
+                out[i] = true;
+            }
+        }
+        out
+    }
+
+    /// A note's date (§8.4): `date_patterns`, then the file name, then the
+    /// frontmatter keys. Never the file's mtime.
+    fn note_date(&self, rel: &str, lines: &[String], fm: &HashMap<&str, &str>) -> Option<String> {
+        let first_date = |s: &str| self.date.find(s).map(|m| m.as_str().to_string());
+        for line in lines.iter().take(self.cfg.tasks.date_lines) {
+            for re in &self.date_patterns {
+                if let Some(c) = re.captures(line) {
+                    let hit = c.get(1).or_else(|| c.get(0)).map_or("", |m| m.as_str());
+                    if let Some(d) = first_date(hit) {
+                        return Some(d);
+                    }
+                }
+            }
+        }
+        let base = rel.rsplit('/').next().unwrap_or(rel);
+        if let Some(d) = first_date(base) {
+            return Some(d);
+        }
+        self.cfg
+            .tasks
+            .date_keys
+            .iter()
+            .find_map(|k| fm.get(k.as_str()).and_then(|v| first_date(v)))
+    }
+
+    /// `parse_task_text` (§8.2).
+    fn parse_text(&self, raw: &str) -> Parsed {
+        let mut text = raw.to_string();
+        let mut priority = None;
+        let b = text.as_bytes();
+        if b.len() >= 4 && b[0] == b'(' && b[1].is_ascii_uppercase() && b[2] == b')' && is_ws(b[3]) {
+            priority = Some(b[1] as char);
+            let ws = b[3..].iter().take_while(|&&c| is_ws(c)).count();
+            text = text[3 + ws..].to_string();
+        }
+        let due = self.due.captures(&text).map(|c| c[1].to_string());
+        let done_at = self.done_stamp.captures(&text).map(|c| c[1].to_string());
+        if done_at.is_some() {
+            text = self.done_stamp.replace_all(&text, "").into_owned();
+        }
+        let cancelled_at = self.cancel_stamp.captures(&text).map(|c| c[1].to_string());
+        if cancelled_at.is_some() {
+            text = self.cancel_stamp.replace_all(&text, "").into_owned();
+        }
+        let text = blockid::strip(&text);
+        let text = trim(&text);
+        let text = unstrike(text);
+        Parsed {
+            text: trim(text).to_string(),
+            priority,
+            due,
+            done_at,
+            cancelled_at,
+        }
+    }
+
+    /// Display text (`display_text`): without `due:` and the required tag,
+    /// whitespace squeezed.
+    fn display_text(&self, text: &str) -> String {
+        let text = self.due.replace_all(text, "");
+        let text = match &self.cfg.tasks.require_tag {
+            Some(tag) => remove_tag(&text, tag),
+            None => text.into_owned(),
+        };
+        squeeze(&text)
+    }
+
+    /// How a task reads on one line (`entry_text`).
+    pub fn entry_text(&self, task: &Task) -> String {
+        let nested = task.depth > 0 && task.parent.is_some() && !task.orphaned;
+        let lead = if nested { format!("{}↳ ", "  ".repeat(task.depth)) } else { String::new() };
+        let prefix = task.priority.map(|p| format!("({p}) ")).unwrap_or_default();
+        let progress = if task.children > 0 {
+            format!("  [{}/{}]", task.children_closed, task.children)
+        } else {
+            String::new()
+        };
+        let due = task.due.as_ref().map(|d| format!("  [due {d}]")).unwrap_or_default();
+        let context = match (&task.context, nested) {
+            (Some(c), false) => format!("  ← {}", truncate(&self.display_text(c), 40)),
+            _ => String::new(),
+        };
+        format!("{lead}{prefix}{}{progress}{due}{context}", self.display_text(&task.text))
+    }
+}
+
+struct Parsed {
+    text: String,
+    priority: Option<char>,
+    due: Option<String>,
+    done_at: Option<String>,
+    cancelled_at: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Kind {
+    Open,
+    Done,
+    Cancelled,
+}
+
+/// Picks the tasks wanted from a scan, marks orphans and sorts them.
+pub fn select(mut all: Vec<Task>, want: Want, sort: Sort) -> Vec<Task> {
+    let keep: Vec<bool> = all
+        .iter()
+        .map(|t| {
+            !(t.aged_out && !t.tagged)
+                && t.tagged != want.inbox
+                && (want.done || !t.done)
+                && (want.cancelled || !t.cancelled)
+        })
+        .collect();
+    for t in all.iter_mut() {
+        t.orphaned = t.parent.is_some_and(|p| !keep[p]);
+    }
+    let mut out: Vec<Task> = all.into_iter().zip(keep).filter(|(_, k)| *k).map(|(t, _)| t).collect();
+    out.sort_by(|a, b| sort_fields(a, sort).cmp(&sort_fields(b, sort)).then(a.lineno.cmp(&b.lineno)));
+    out
+}
+
+/// The keys a task sorts by, taken from its root task so a subtask stays
+/// under the item it belongs to (§8.7). Missing values sort last.
+fn sort_fields(t: &Task, sort: Sort) -> (String, String, String, usize) {
+    let priority = t.root_priority.map(String::from).unwrap_or_else(|| "~".into());
+    let due = t.root_due.clone().unwrap_or_else(|| "9999-99-99".into());
+    match sort {
+        Sort::Priority => (priority, due, t.rel.clone(), t.root_lineno),
+        Sort::Due => (due, priority, t.rel.clone(), t.root_lineno),
+        Sort::Added => (
+            t.date.clone().unwrap_or_else(|| "9999-99-99".into()),
+            t.rel.clone(),
+            String::new(),
+            t.root_lineno,
+        ),
+    }
+}
+
+/// The frontmatter's flat pairs and the number of lines it takes (0 if none).
+fn frontmatter(lines: &[String]) -> (HashMap<&str, &str>, usize) {
+    let mut fm = HashMap::new();
+    if lines.first().map(String::as_str) != Some("---") {
+        return (fm, 0);
+    }
+    for (i, line) in lines.iter().enumerate().skip(1) {
+        if line == "---" {
+            return (fm, i + 1);
+        }
+        let key_len = line
+            .bytes()
+            .take_while(|b| b.is_ascii_alphanumeric() || *b == b'_' || *b == b'-')
+            .count();
+        if key_len > 0 && line.as_bytes().get(key_len) == Some(&b':') {
+            // A later duplicate replaces the earlier value, as in the plugin.
+            fm.insert(&line[..key_len], trim(&line[key_len + 1..]));
+        }
+    }
+    (HashMap::new(), 0)
+}
+
+fn in_dirs(rel: &str, dirs: &[String]) -> bool {
+    dirs.iter()
+        .any(|d| rel == d || rel.strip_prefix(d.as_str()).is_some_and(|r| r.starts_with('/')))
+}
+
+fn fence_delim(line: &str) -> Option<(u8, usize)> {
+    let t = line.trim_start_matches(|c: char| c.is_ascii() && is_ws(c as u8)).as_bytes();
+    let ch = *t.first().filter(|&&c| c == b'`' || c == b'~')?;
+    let len = t.iter().take_while(|&&c| c == ch).count();
+    (len >= 3).then_some((ch, len))
+}
+
+/// The text of a heading line (`^#+%s+(.*)$`).
+fn heading_text(line: &str) -> Option<&str> {
+    let rest = line.trim_start_matches('#');
+    if rest.len() == line.len() || !rest.bytes().next().is_some_and(is_ws) {
+        return None;
+    }
+    Some(rest.trim_start_matches(|c: char| c.is_ascii() && is_ws(c as u8)))
+}
+
+/// Lua's greedy `%s+(.+)$` after position `at`: the whitespace run, leaving at
+/// least one character for the capture. None when there is no whitespace or
+/// nothing after it.
+fn after_ws(line: &str, at: usize) -> Option<&str> {
+    let rest = &line[at..];
+    let ws = rest.bytes().take_while(|&b| is_ws(b)).count();
+    if ws == 0 || rest.is_empty() {
+        return None;
+    }
+    if ws < rest.len() {
+        Some(&rest[ws..])
+    } else if ws >= 2 {
+        // Only whitespace: `%s+` gives back one byte for `.+`.
+        Some(&rest[ws - 1..])
+    } else {
+        None
+    }
+}
+
+/// A checkbox line (§8.1): its kind and raw text.
+fn checkbox_item(line: &str) -> Option<(Kind, &str)> {
+    let (at, mark) = crate::task::checkbox(line)?;
+    let kind = match mark {
+        b' ' => Kind::Open,
+        b'x' | b'X' => Kind::Done,
+        b'-' => Kind::Cancelled,
+        _ => return None,
+    };
+    after_ws(line, at + 3).map(|raw| (kind, raw))
+}
+
+/// The text of a bullet that is not a checkbox (`^%s*[-*+]%s+(.+)$` or
+/// `^%s*%d+[%.%)]%s+(.+)$`).
+fn bullet_text(line: &str) -> Option<&str> {
+    let lead = line.bytes().take_while(|&b| is_ws(b)).count();
+    let b = &line.as_bytes()[lead..];
+    match b.first()? {
+        b'-' | b'*' | b'+' => after_ws(line, lead + 1),
+        c if c.is_ascii_digit() => {
+            let digits = b.iter().take_while(|c| c.is_ascii_digit()).count();
+            match b.get(digits) {
+                Some(b'.' | b')') => after_ws(line, lead + digits + 1),
+                _ => None,
+            }
+        }
+        _ => None,
+    }
+}
+
+/// Indent width, a tab counting as four.
+fn indent_width(line: &str) -> usize {
+    line.bytes()
+        .take_while(|&b| b == b' ' || b == b'\t')
+        .map(|b| if b == b'\t' { 4 } else { 1 })
+        .sum()
+}
+
+fn unstrike(text: &str) -> &str {
+    match text.strip_prefix("~~").and_then(|t| t.strip_suffix("~~")) {
+        Some(inner) if text.len() >= 4 => inner,
+        _ => text,
+    }
+}
+
+/// Removes `#tag` wherever the next byte is not alphanumeric (`%f[%W]`).
+fn remove_tag(text: &str, tag: &str) -> String {
+    let needle = format!("#{tag}");
+    let mut out = String::new();
+    let mut rest = text;
+    while let Some(i) = rest.find(&needle) {
+        let end = i + needle.len();
+        let boundary = rest.as_bytes().get(end).is_none_or(|c| !c.is_ascii_alphanumeric());
+        out.push_str(&rest[..i]);
+        if !boundary {
+            out.push_str(&needle);
+        }
+        rest = &rest[end..];
+    }
+    out.push_str(rest);
+    out
+}
+
+fn squeeze(text: &str) -> String {
+    text.split(|c: char| c.is_ascii() && is_ws(c as u8))
+        .filter(|w| !w.is_empty())
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+/// Cuts text to `width` display columns, ending in `…` when cut.
+fn truncate(text: &str, width: usize) -> String {
+    if text.width() <= width {
+        return text.to_string();
+    }
+    let mut out = String::new();
+    for c in text.chars() {
+        let next = format!("{out}{c}");
+        if next.width() > width - 1 {
+            break;
+        }
+        out = next;
+    }
+    out.push('…');
+    out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn cfg() -> Config {
+        let mut c = Config::default();
+        c.tasks.require_tag = Some("todo".into());
+        c.tasks.since_days = Some(60);
+        c.tasks.always = vec!["tasks/active.md".into()];
+        c.tasks.date_patterns = vec![r"^\*\*作成日\*\*:\s*([0-9]{4}-[0-9]{2}-[0-9]{2})".into()];
+        c
+    }
+
+    fn scan(cfg: &Config, rel: &str, text: &str, cutoff: Option<&str>) -> Vec<Task> {
+        let lines: Vec<String> = text.lines().map(str::to_string).collect();
+        let s = Scanner::new(cfg).unwrap();
+        let mut all = Vec::new();
+        s.scan_note(rel, &lines, cutoff, &mut all);
+        all
+    }
+
+    #[test]
+    fn worked_example() {
+        let c = cfg();
+        let all = scan(
+            &c,
+            "n.md",
+            "- [-] (A) ~~#projectx review draft #todo due:2026-09-14~~ cancelled:2026-09-16 ^a1b2c3",
+            None,
+        );
+        let t = &all[0];
+        assert!(t.cancelled);
+        assert_eq!(t.priority, Some('A'));
+        assert_eq!(t.due.as_deref(), Some("2026-09-14"));
+        assert_eq!(t.cancelled_at.as_deref(), Some("2026-09-16"));
+        assert_eq!(t.id.as_deref(), Some("a1b2c3"));
+        assert_eq!(t.text, "#projectx review draft #todo due:2026-09-14");
+    }
+
+    #[test]
+    fn grammar_edges() {
+        let c = cfg();
+        let all = scan(&c, "n.md", "- [ ]\n- [ ]  \n+ [ ] plus\n1. [ ] num\n- [>] arrow\n* [x] star done:2026-07-17 10:00", None);
+        // `- [ ]  ` is a task with empty text; `- [ ]`, `+`, `1.` and `[>]` are not.
+        assert_eq!(all.len(), 2);
+        assert_eq!(all[0].text, "");
+        assert!(all[1].done);
+        assert_eq!(all[1].done_at.as_deref(), Some("2026-07-17 10:00"));
+        assert_eq!(all[1].text, "star");
+    }
+
+    #[test]
+    fn nesting_and_tags() {
+        let c = cfg();
+        let text = "\
+- [ ] (B) parent #todo due:2026-07-31
+  - [x] (A) child done:2026-07-31 08:58
+  - note
+    - [ ] grandchild under a bullet
+- [ ] untagged
+Paragraph at the margin.
+  - [ ] indented after the paragraph
+# Heading
+- [ ] #todo-x is another tag
+```
+- [ ] #todo in a fence
+```";
+        let all = scan(&c, "n.md", text, None);
+        let texts: Vec<(&str, bool, usize)> = all.iter().map(|t| (t.text.as_str(), t.tagged, t.depth)).collect();
+        assert_eq!(
+            texts,
+            vec![
+                ("parent #todo due:2026-07-31", true, 0),
+                ("child", true, 1),
+                ("grandchild under a bullet", true, 1),
+                ("untagged", false, 0),
+                ("indented after the paragraph", false, 0),
+                ("#todo-x is another tag", false, 0),
+            ]
+        );
+        assert_eq!(all[0].children, 2);
+        assert_eq!(all[0].children_closed, 1);
+        assert_eq!(all[2].context.as_deref(), Some("note"));
+        assert_eq!(all[1].parent, Some(0));
+        assert_eq!(all[4].parent, None);
+    }
+
+    #[test]
+    fn dates_and_aging() {
+        let c = cfg();
+        let s = Scanner::new(&c).unwrap();
+        let lines = |t: &str| t.lines().map(str::to_string).collect::<Vec<_>>();
+        let d = |rel: &str, t: &str| {
+            let l = lines(t);
+            let (fm, _) = frontmatter(&l);
+            s.note_date(rel, &l, &fm)
+        };
+        assert_eq!(d("x.md", "# T\n**作成日**: 2026-03-12").as_deref(), Some("2026-03-12"));
+        assert_eq!(d("x.md", "**作成日**：2026-03-12"), None);
+        assert_eq!(d("a/2026-09-18 meeting.md", "").as_deref(), Some("2026-09-18"));
+        assert_eq!(d("20260514-1030.md", ""), None);
+        assert_eq!(d("x.md", "---\ncreated: 2026-01-02\n---").as_deref(), Some("2026-01-02"));
+        assert_eq!(d("x.md", "---\ncreated: 2026-01-02"), None);
+
+        // An old note keeps its tagged tasks and loses its inbox items.
+        let old = "- [ ] tagged #todo\n- [ ] untagged";
+        let all = scan(&c, "lognote/2025-01-01.md", old, Some("2026-08-01"));
+        let tasks = select(all.clone(), Want::default(), Sort::Priority);
+        let inbox = select(all, Want { inbox: true, ..Want::default() }, Sort::Priority);
+        assert_eq!(tasks.len(), 1);
+        assert!(inbox.is_empty());
+        // tasks/active.md never ages out.
+        let all = scan(&c, "tasks/active.md", "---\ndate: 2025-01-01\n---\n- [ ] untagged", Some("2026-08-01"));
+        assert_eq!(select(all, Want { inbox: true, ..Want::default() }, Sort::Priority).len(), 1);
+    }
+
+    #[test]
+    fn opting_out_and_ignored_dirs() {
+        let c = cfg();
+        assert!(scan(&c, "n.md", "---\ntasks: false\n---\n- [ ] x #todo", None).is_empty());
+        assert!(scan(&c, "templates/t.md", "- [ ] x #todo", None).is_empty());
+        assert_eq!(scan(&c, "templatesx/t.md", "- [ ] x #todo", None).len(), 1);
+    }
+
+    #[test]
+    fn sorting_keeps_subtasks_under_their_root() {
+        let c = cfg();
+        let text = "\
+- [ ] (B) second #todo
+  - [ ] (A) step of second
+- [ ] (A) first #todo due:2026-10-02
+- [ ] none #todo";
+        let all = scan(&c, "n.md", text, None);
+        let sorted = select(all, Want::default(), Sort::Priority);
+        let order: Vec<&str> = sorted.iter().map(|t| t.text.as_str()).collect();
+        assert_eq!(order, vec!["first #todo due:2026-10-02", "second #todo", "step of second", "none #todo"]);
+    }
+
+    #[test]
+    fn entries() {
+        let c = cfg();
+        let s = Scanner::new(&c).unwrap();
+        let text = "\
+- context bullet that is rather long and keeps going past the cut
+  - [ ] (A) task #todo due:2026-10-02 ^a1b2c3
+- [ ] parent #todo
+  - [x] child done:2026-09-01 10:00
+  - [ ] other child";
+        let all = scan(&c, "n.md", text, None);
+        let shown = select(all.clone(), Want::default(), Sort::Priority);
+        let e: Vec<String> = shown.iter().map(|t| s.entry_text(t)).collect();
+        assert_eq!(
+            e,
+            vec![
+                "(A) task  [due 2026-10-02]  ← context bullet that is rather long and …",
+                "parent  [1/2]",
+                "  ↳ other child",
+            ]
+        );
+        assert_eq!(truncate("日本語のテキスト", 7), "日本語…");
+    }
+}

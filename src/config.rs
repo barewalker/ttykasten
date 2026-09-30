@@ -120,6 +120,43 @@ pub struct Tasks {
     pub capture_note: Option<String>,
     pub always: Vec<String>,
     pub new_checkbox: String,
+    /// "all": every line outside frontmatter, fences and headings can hold a
+    /// task. "headings": only lines under a heading matching `headings`.
+    pub scope: String,
+    /// Regexes matched against a heading's trimmed, ASCII-lowercased text
+    /// (scope = "headings").
+    pub headings: Vec<String>,
+    pub ignore: TaskIgnore,
+    /// Untagged checkboxes in notes dated more than this many days ago are
+    /// left out. Unset: no limit. Tagged tasks never age out.
+    pub since_days: Option<u32>,
+    /// Frontmatter keys read for a note's date, in order.
+    pub date_keys: Vec<String>,
+    /// Regexes tried on a note's first `date_lines` lines to date it, before
+    /// the file name and `date_keys` (the plugin's `tasks.date` hook). The
+    /// first YYYY-MM-DD in the match (or in its first group) is the date.
+    pub date_patterns: Vec<String>,
+    pub date_lines: usize,
+    /// Order of the task list: "priority", "due" or "added".
+    pub sort: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct TaskIgnore {
+    /// A frontmatter key whose value false / no / off opts a note out.
+    pub frontmatter_key: Option<String>,
+    /// Directories whose notes are never scanned.
+    pub dirs: Vec<String>,
+}
+
+impl Default for TaskIgnore {
+    fn default() -> Self {
+        TaskIgnore {
+            frontmatter_key: Some("tasks".into()),
+            dirs: vec!["templates".into()],
+        }
+    }
 }
 
 impl Default for Tasks {
@@ -129,6 +166,19 @@ impl Default for Tasks {
             capture_note: None,
             always: Vec::new(),
             new_checkbox: "- [ ] ".into(),
+            scope: "all".into(),
+            headings: vec![
+                r"^tasks?([^A-Za-z]|$)".into(),
+                r"^to-?dos?([^A-Za-z]|$)".into(),
+                "^タスク".into(),
+                "^やること".into(),
+            ],
+            ignore: TaskIgnore::default(),
+            since_days: None,
+            date_keys: vec!["date".into(), "created".into()],
+            date_patterns: Vec::new(),
+            date_lines: 10,
+            sort: "priority".into(),
         }
     }
 }
@@ -234,6 +284,8 @@ pub const ACTIONS: &[&str] = &[
     "daily",
     "weekly",
     "capture",
+    "tasks",
+    "inbox",
     "find",
     "new",
     "log",

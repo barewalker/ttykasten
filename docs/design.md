@@ -47,8 +47,9 @@ lives outside it, in a single executable.
 - log: list and create daily and weekly notes
 - find: find notes
 
-Next steps: the task list and inbox, due dates, turning a line into a task,
-and the week digest. (Block links, principle 4, are done: see Progress.)
+Next steps: acting on tasks from the list (done, cancel, due date, tag),
+turning a line into a task, and the week digest. (Block links and the
+read-only task list are done: see Progress.)
 
 ## Language
 
@@ -110,3 +111,20 @@ on every start, so changes need no rebuild.
   is "osc52" by default (works over ssh and mosh), "none", or a command.
 - Checked byte for byte against the plugin's YankLink and LinkToDaily under
   `nvim --headless`, with the daily note both missing and existing.
+
+2026-09-30 (evening): the task list and inbox, read-only (step 1 of tasks).
+
+- `tasks` and `inbox` scan the notes the way the plugin's `collect` does
+  (format.md §8.3–§8.7): notes with a checkbox (rg, honouring .gitignore),
+  frontmatter opt-out and ignored dirs, scannable lines, the nesting stack
+  with `require_tag` inheritance and the margin rule (Q9), note dates, aging
+  (`since_days`, `always`), and sorting by the root task.
+- The plugin's `tasks.date` hook is Lua, so ttykasten has `date_patterns`
+  (regexes on a note's first `date_lines` lines) in its place.
+- Entries read as the plugin's `entry_text`: indent and `↳` for subtasks,
+  `(P)`, progress `[closed/total]`, `[due …]`, and `← context` for a task
+  whose parent is not shown. `alt-s` cycles the order through fzf's
+  `transform` and `reload`, via two hidden subcommands.
+- Checked against the plugin's `collect` + `entry_text` on a real collection:
+  task list and inbox, in all three orders, identical line for line.
+

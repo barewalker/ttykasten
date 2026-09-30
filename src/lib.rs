@@ -11,6 +11,7 @@ pub mod link;
 pub mod note;
 pub mod preview;
 pub mod task;
+pub mod tasks;
 pub mod template;
 
 /// ASCII whitespace, Lua's `%s`. The ideographic space U+3000 is not included (§0.2).

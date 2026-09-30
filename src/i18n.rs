@@ -23,6 +23,8 @@ pub struct Msgs {
     pub desc_link: &'static str,
     pub desc_link_daily: &'static str,
     pub desc_backlinks: &'static str,
+    pub desc_tasks: &'static str,
+    pub desc_inbox: &'static str,
     pub prompt_menu: &'static str,
     pub prompt_title: &'static str,
     pub prompt_task: &'static str,
@@ -31,6 +33,9 @@ pub struct Msgs {
     pub prompt_find: &'static str,
     pub prompt_line: &'static str,
     pub prompt_backlinks: &'static str,
+    pub prompt_tasks: &'static str,
+    pub prompt_inbox: &'static str,
+    pub tasks_header: &'static str,
     pub log_header: &'static str,
     pub unknown_action: &'static str,
     pub menu_item_empty: &'static str,
@@ -48,6 +53,7 @@ pub struct Msgs {
     pub line_changed: &'static str,
     pub no_backlinks: &'static str,
     pub linked_into: &'static str,
+    pub bad_pattern: &'static str,
 }
 
 const EN: Msgs = Msgs {
@@ -58,6 +64,8 @@ Usage: ttykasten [ACTION] [ARG…]
   daily           open today's daily note (created from the template if missing)
   weekly          open this week's weekly note
   capture [TEXT]  append a task to the capture note
+  tasks           the task list (alt-s: sort by priority, due date, added)
+  inbox           checkboxes that are not tasks yet (no required tag)
   find            find a note and open it
   new [TITLE]     create a note from the template
   log             list daily and weekly notes (ctrl-x: pick a date)
@@ -80,6 +88,8 @@ Config: $TTYKASTEN_CONFIG, else $XDG_CONFIG_HOME/ttykasten/config.toml.
     desc_link: "Link to a line (copy [[note#^id]])",
     desc_link_daily: "Link a line into today's daily note",
     desc_backlinks: "Links to a line or a note",
+    desc_tasks: "Task list",
+    desc_inbox: "Task inbox (untagged checkboxes)",
     prompt_menu: "ttykasten> ",
     prompt_title: "Title> ",
     prompt_task: "Task> ",
@@ -88,6 +98,9 @@ Config: $TTYKASTEN_CONFIG, else $XDG_CONFIG_HOME/ttykasten/config.toml.
     prompt_find: "find> ",
     prompt_line: "line> ",
     prompt_backlinks: "backlinks> ",
+    prompt_tasks: "tasks",
+    prompt_inbox: "inbox",
+    tasks_header: "enter: open / alt-s: sort (priority, due, added)",
     log_header: "enter: open / ctrl-x: pick a date",
     unknown_action: "unknown action: {}",
     menu_item_empty: "menu item has neither action nor command",
@@ -105,6 +118,7 @@ Config: $TTYKASTEN_CONFIG, else $XDG_CONFIG_HOME/ttykasten/config.toml.
     line_changed: "{} changed after it was listed; pick the line again",
     no_backlinks: "nothing links to {}",
     linked_into: "{} -> {}:{}",
+    bad_pattern: "bad regex in {}: {}",
 };
 
 const JA: Msgs = Msgs {
@@ -115,6 +129,8 @@ const JA: Msgs = Msgs {
   daily           今日の日誌を開く (無ければ雛形から作る)
   weekly          今週の週まとめを開く
   capture [文]    タスクを書き留める
+  tasks           タスク一覧 (alt-s で優先度・期日・追加順に並べ替え)
+  inbox           まだタスクになっていないチェックボックス (タグ無し)
   find            ノートを探して開く
   new [題名]      雛形から新しいノートを作る
   log             日誌と週まとめの一覧 (ctrl-x で日付を指定)
@@ -137,6 +153,8 @@ const JA: Msgs = Msgs {
     desc_link: "行へのリンクを取る ([[note#^id]] をコピー)",
     desc_link_daily: "行へのリンクを今日の日誌に書く",
     desc_backlinks: "行やノートへのリンクを探す",
+    desc_tasks: "タスク一覧",
+    desc_inbox: "受信箱 (タグの無いチェックボックス)",
     prompt_menu: "ttykasten> ",
     prompt_title: "題名> ",
     prompt_task: "タスク> ",
@@ -145,6 +163,9 @@ const JA: Msgs = Msgs {
     prompt_find: "find> ",
     prompt_line: "line> ",
     prompt_backlinks: "backlinks> ",
+    prompt_tasks: "tasks",
+    prompt_inbox: "inbox",
+    tasks_header: "enter: 開く / alt-s: 並べ替え (優先度・期日・追加順)",
     log_header: "enter: 開く / ctrl-x: 日付を指定",
     unknown_action: "知らない操作: {}",
     menu_item_empty: "メニューの項目に action も command も無い",
@@ -162,6 +183,7 @@ const JA: Msgs = Msgs {
     line_changed: "{} は一覧を出した後に書き換わった。行を選び直してほしい",
     no_backlinks: "{} へのリンクは無い",
     linked_into: "{} -> {}:{}",
+    bad_pattern: "{} の正規表現が不正: {}",
 };
 
 impl Language {
@@ -186,6 +208,8 @@ impl Msgs {
             "link" => self.desc_link,
             "link-daily" => self.desc_link_daily,
             "backlinks" => self.desc_backlinks,
+            "tasks" => self.desc_tasks,
+            "inbox" => self.desc_inbox,
             _ => return None,
         })
     }
