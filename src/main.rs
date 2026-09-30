@@ -41,6 +41,10 @@ fn run() -> Result<()> {
         Some((c, r)) => (c.as_str(), r),
         None => ("", &[][..]),
     };
+    if matches!(cmd, "--version" | "-V" | "version") {
+        println!("{}", version());
+        return Ok(());
+    }
     if cmd == "config-example" {
         print!("{}", config::EXAMPLE);
         return Ok(());
@@ -633,6 +637,15 @@ impl App {
             bail!(fill(self.msg.failed, &[&command, &status]));
         }
         Ok(())
+    }
+}
+
+/// `ttykasten 0.2.0 (39ef7e6)`: the version, and the commit when built from git.
+fn version() -> String {
+    let v = env!("CARGO_PKG_VERSION");
+    match env!("TTYKASTEN_COMMIT") {
+        "" => format!("ttykasten {v}"),
+        c => format!("ttykasten {v} ({c})"),
     }
 }
 

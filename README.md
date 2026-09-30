@@ -45,6 +45,7 @@ cargo install --git https://github.com/barewalker/ttykasten
 | `link-daily` | the same, and append `- [[note#^id]]` to today's daily note |
 | `backlinks` | pick a line and list the lines linking to it (or, for a line with no id, to its note); open one at its line |
 | `config-example` | print an example config file |
+| `--version` | print the version and the commit it was built from |
 
 Leave out `TEXT` or `TITLE` to type it into an input line.
 

@@ -65,6 +65,7 @@ Usage: ttykasten [ACTION] [ARG…]
   link-daily      the same, and write the link into today's daily note
   backlinks       pick a line (or note) and list the lines linking to it
   config-example  print an example config file
+  --version       print the version and the commit it was built from
 
 Leave TEXT or TITLE out to type it into an input line.
 Keys set in the menu (e.g. key = \"kd\") also work as actions.
@@ -121,6 +122,7 @@ const JA: Msgs = Msgs {
   link-daily      同じく、リンクを今日の日誌にも書く
   backlinks       行 (かノート) を選び、そこへリンクしている行を一覧する
   config-example  設定ファイルの見本を出す
+  --version       版と、元にしたコミットを出す
 
 文や題名を省くと、起動後の入力欄で受ける。
 メニューで決めたキー (key = \"kd\" など) も操作の名前として使える。
