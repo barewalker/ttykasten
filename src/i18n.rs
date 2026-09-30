@@ -20,12 +20,17 @@ pub struct Msgs {
     pub desc_find: &'static str,
     pub desc_new: &'static str,
     pub desc_log: &'static str,
+    pub desc_link: &'static str,
+    pub desc_link_daily: &'static str,
+    pub desc_backlinks: &'static str,
     pub prompt_menu: &'static str,
     pub prompt_title: &'static str,
     pub prompt_task: &'static str,
     pub prompt_date: &'static str,
     pub prompt_log: &'static str,
     pub prompt_find: &'static str,
+    pub prompt_line: &'static str,
+    pub prompt_backlinks: &'static str,
     pub log_header: &'static str,
     pub unknown_action: &'static str,
     pub menu_item_empty: &'static str,
@@ -39,6 +44,10 @@ pub struct Msgs {
     pub future_date: &'static str,
     pub cannot_start: &'static str,
     pub failed: &'static str,
+    pub blank_line: &'static str,
+    pub line_changed: &'static str,
+    pub no_backlinks: &'static str,
+    pub linked_into: &'static str,
 }
 
 const EN: Msgs = Msgs {
@@ -52,6 +61,9 @@ Usage: ttykasten [ACTION] [ARG…]
   find            find a note and open it
   new [TITLE]     create a note from the template
   log             list daily and weekly notes (ctrl-x: pick a date)
+  link            pick a line of any note; copy a link to it ([[note#^id]])
+  link-daily      the same, and write the link into today's daily note
+  backlinks       pick a line (or note) and list the lines linking to it
   config-example  print an example config file
 
 Leave TEXT or TITLE out to type it into an input line.
@@ -64,12 +76,17 @@ Config: $TTYKASTEN_CONFIG, else $XDG_CONFIG_HOME/ttykasten/config.toml.
     desc_find: "Find a note",
     desc_new: "New note",
     desc_log: "Daily and weekly notes",
+    desc_link: "Link to a line (copy [[note#^id]])",
+    desc_link_daily: "Link a line into today's daily note",
+    desc_backlinks: "Links to a line or a note",
     prompt_menu: "ttykasten> ",
     prompt_title: "Title> ",
     prompt_task: "Task> ",
     prompt_date: "Date (YYYY-MM-DD)> ",
     prompt_log: "log> ",
     prompt_find: "find> ",
+    prompt_line: "line> ",
+    prompt_backlinks: "backlinks> ",
     log_header: "enter: open / ctrl-x: pick a date",
     unknown_action: "unknown action: {}",
     menu_item_empty: "menu item has neither action nor command",
@@ -83,6 +100,10 @@ Config: $TTYKASTEN_CONFIG, else $XDG_CONFIG_HOME/ttykasten/config.toml.
     future_date: "that date is in the future: {}",
     cannot_start: "cannot start {}",
     failed: "{} failed ({})",
+    blank_line: "nothing on that line to link to",
+    line_changed: "{} changed after it was listed; pick the line again",
+    no_backlinks: "nothing links to {}",
+    linked_into: "{} -> {}:{}",
 };
 
 const JA: Msgs = Msgs {
@@ -96,6 +117,9 @@ const JA: Msgs = Msgs {
   find            ノートを探して開く
   new [題名]      雛形から新しいノートを作る
   log             日誌と週まとめの一覧 (ctrl-x で日付を指定)
+  link            ノートの行を選び、その行へのリンク ([[note#^id]]) をコピーする
+  link-daily      同じく、リンクを今日の日誌にも書く
+  backlinks       行 (かノート) を選び、そこへリンクしている行を一覧する
   config-example  設定ファイルの見本を出す
 
 文や題名を省くと、起動後の入力欄で受ける。
@@ -108,12 +132,17 @@ const JA: Msgs = Msgs {
     desc_find: "ノートを探して開く",
     desc_new: "新しいノートを作る",
     desc_log: "日誌と週まとめの一覧",
+    desc_link: "行へのリンクを取る ([[note#^id]] をコピー)",
+    desc_link_daily: "行へのリンクを今日の日誌に書く",
+    desc_backlinks: "行やノートへのリンクを探す",
     prompt_menu: "ttykasten> ",
     prompt_title: "題名> ",
     prompt_task: "タスク> ",
     prompt_date: "日付 (YYYY-MM-DD)> ",
     prompt_log: "log> ",
     prompt_find: "find> ",
+    prompt_line: "line> ",
+    prompt_backlinks: "backlinks> ",
     log_header: "enter: 開く / ctrl-x: 日付を指定",
     unknown_action: "知らない操作: {}",
     menu_item_empty: "メニューの項目に action も command も無い",
@@ -127,6 +156,10 @@ const JA: Msgs = Msgs {
     future_date: "先の日付は開けない: {}",
     cannot_start: "{} を起動できない",
     failed: "{} が失敗した ({})",
+    blank_line: "その行にはリンクする中身が無い",
+    line_changed: "{} は一覧を出した後に書き換わった。行を選び直してほしい",
+    no_backlinks: "{} へのリンクは無い",
+    linked_into: "{} -> {}:{}",
 };
 
 impl Language {
@@ -148,6 +181,9 @@ impl Msgs {
             "find" => self.desc_find,
             "new" => self.desc_new,
             "log" => self.desc_log,
+            "link" => self.desc_link,
+            "link-daily" => self.desc_link_daily,
+            "backlinks" => self.desc_backlinks,
             _ => return None,
         })
     }

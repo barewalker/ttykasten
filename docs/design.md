@@ -47,8 +47,8 @@ lives outside it, in a single executable.
 - log: list and create daily and weekly notes
 - find: find notes
 
-Next steps: block links (principle 4), the task list and inbox, due dates,
-turning a line into a task, and the week digest.
+Next steps: the task list and inbox, due dates, turning a line into a task,
+and the week digest. (Block links, principle 4, are done: see Progress.)
 
 ## Language
 
@@ -93,3 +93,20 @@ on every start, so changes need no rebuild.
 - The capture note (`tasks.capture_note` / `always`), the tag added on
   capture (`require_tag`), block ids (`block_id`), fzf arguments and preview
   colours are all configurable too.
+
+2026-09-30 (later still): block links (principle 4).
+
+- `link` lists every non-blank line of every note in fzf, with the line
+  highlighted in the preview. The picked line keeps its `^id`, or gets a new
+  one written into the note (YankLink, format.md §9.3), and `[[note#^id]]`
+  is copied. `block_id.alias` adds the plugin's `|alias`.
+- `link-daily` also appends `daily_bullet` + the link to today's daily note,
+  creating it from its template if needed (LinkToDaily, §9.4; the title is
+  `notes.daily.format`, as in the plugin's code).
+- `backlinks` picks a line and lists the lines linking to it: to the line
+  when it has an id (including `[[#^id]]` inside its own note), otherwise to
+  its note (§10). Enter opens the editor at that line (`editor_line`).
+- A terminal has no registers, so "yank" means the clipboard: `clipboard`
+  is "osc52" by default (works over ssh and mosh), "none", or a command.
+- Checked byte for byte against the plugin's YankLink and LinkToDaily under
+  `nvim --headless`, with the daily note both missing and existing.

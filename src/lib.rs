@@ -7,6 +7,7 @@ pub mod blockid;
 pub mod config;
 pub mod fileio;
 pub mod i18n;
+pub mod link;
 pub mod note;
 pub mod preview;
 pub mod task;

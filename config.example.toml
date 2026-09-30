@@ -25,6 +25,15 @@ hdate_format = "%B %d, %Y"
 # Editor that opens notes. Unset: $EDITOR, else nvim.
 # editor = "nvim"
 
+# Editor argument that opens a file at a line ({line} is replaced), used by
+# `backlinks`. "" opens files at the top.
+editor_line = "+{line}"
+
+# Where `link` and `link-daily` copy the link: "osc52" (the terminal's
+# clipboard; also works over ssh and mosh, and in tmux with set-clipboard on),
+# "none", or a command that reads the link on stdin, e.g. "wl-copy".
+clipboard = "osc52"
+
 [notes.daily]
 dir = "daily"
 format = "%Y-%m-%d"
@@ -50,6 +59,9 @@ new_checkbox = "- [ ] "
 length = 6
 alphabet = "abcdefghijklmnopqrstuvwxyz0123456789"
 on_capture = false      # give captured tasks a ^id
+daily_bullet = "- "     # written before the link that `link-daily` adds
+alias = false           # link as [[note#^id|text of the line]]
+alias_max = 40          # cut the alias to this many characters; 0 = whole
 
 [log]
 day_label = "%Y-%m-%d (%a)"
@@ -71,10 +83,12 @@ priority = "1;33"
 due = "31"
 dim = "2"
 cancelled = "2;9"
+mark = "7"              # the picked line in `link` and `backlinks`
 
 # The menu shown when ttykasten runs with no arguments. Unset: every action,
 # in the default order. Set: only the items written, in the order written.
 #   action   a ttykasten action: daily weekly capture find new log
+#            link link-daily backlinks
 #   command  a shell command to run instead (sh -c, in home)
 #   key      a hint shown in the list; `ttykasten <key>` also runs the item
 #   label    the description; unset uses the language's default

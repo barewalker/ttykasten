@@ -13,10 +13,10 @@ ttykasten               # the menu
 ttykasten daily         # today's daily note, created from its template if missing
 ttykasten capture       # capture a one-line task (typed into an input line)
 ttykasten find          # find a note, with a coloured preview
+ttykasten link          # pick any line of any note; copy [[note#^id]]
 ```
 
-Status: an early prototype. Block links, the task list and the week digest
-are planned (see [docs/design.md](docs/design.md)).
+Status: an early prototype. The task list and the week digest are planned (see [docs/design.md](docs/design.md)).
 
 ## Requirements
 
@@ -41,9 +41,18 @@ cargo install --git https://github.com/barewalker/ttykasten
 | `find` | find a note by path and open it |
 | `new [TITLE]` | create a note from the template and open it |
 | `log` | list recent daily and weekly notes; `ctrl-x` picks a date |
+| `link` | pick a line of any note; give it a `^id` if it has none; copy `[[note#^id]]` |
+| `link-daily` | the same, and append `- [[note#^id]]` to today's daily note |
+| `backlinks` | pick a line and list the lines linking to it (or, for a line with no id, to its note); open one at its line |
 | `config-example` | print an example config file |
 
-Leave out `TEXT` or `TITLE` to type it into an input line. Subcommands exist
+Leave out `TEXT` or `TITLE` to type it into an input line.
+
+Links point at a line, not only at a note: `[[note#^id]]` finds its line
+wherever it moves, because the id travels with the line. `link` copies the
+link through the terminal (OSC 52) by default, so it works over ssh and mosh;
+set `clipboard` to `"none"` or to a command such as `"wl-copy"` to change
+that. Subcommands exist
 so that key bindings (tmux, herdr, shell aliases) can call actions directly.
 
 ## Configuration

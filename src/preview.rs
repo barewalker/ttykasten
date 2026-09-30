@@ -5,7 +5,7 @@
 //! What counts as what follows format.md: headings are `^#+\s` (§8.3), tags
 //! `#[A-Za-z0-9_-]+` (§10), links `[[…]]` (§9.2), ids §9.1.
 
-use crate::blockid;
+use crate::{blockid, task};
 use crate::config::Colors;
 
 const RESET: &str = "\x1b[0m";
@@ -21,12 +21,13 @@ enum Style {
     Priority,
     Due,
     Cancelled,
+    Mark,
 }
 use Style::*;
 
 /// The colour settings as terminal escape sequences.
 struct Palette {
-    seqs: [String; 9],
+    seqs: [String; 10],
 }
 
 impl Palette {
@@ -43,6 +44,7 @@ impl Palette {
                 sgr(&c.priority),
                 sgr(&c.due),
                 sgr(&c.cancelled),
+                sgr(&c.mark),
             ],
         }
     }
@@ -52,14 +54,16 @@ impl Palette {
     }
 }
 
-/// Renders a file's lines as coloured text.
-pub fn render<S: AsRef<str>>(lines: &[S], colors: &Colors) -> String {
+/// Renders a file's lines as coloured text. The line with index `mark`
+/// (0-based), if any, is shown in the mark colour instead.
+pub fn render<S: AsRef<str>>(lines: &[S], colors: &Colors, mark: Option<usize>) -> String {
     let pal = Palette::new(colors);
     let mut out = String::new();
     let fm_end = frontmatter_end(lines);
     let mut fence: Option<(u8, usize)> = None;
     for (i, line) in lines.iter().enumerate() {
         let line = line.as_ref();
+        let start = out.len();
         if fm_end.is_some_and(|end| i <= end) {
             paint(&mut out, pal.get(Dim), line);
         } else if let Some((ch, len)) = fence {
@@ -74,6 +78,10 @@ pub fn render<S: AsRef<str>>(lines: &[S], colors: &Colors) -> String {
             paint(&mut out, pal.get(Heading), line);
         } else {
             inline(&mut out, &pal, line);
+        }
+        if mark == Some(i) {
+            out.truncate(start);
+            paint(&mut out, pal.get(Mark), line);
         }
         out.push('\n');
     }
@@ -115,22 +123,6 @@ fn is_heading(line: &str) -> bool {
     rest.len() < line.len() && rest.bytes().next().is_some_and(crate::is_ws)
 }
 
-/// For a checkbox line: where `[m]` starts after the indent and bullet, and the mark.
-fn checkbox(line: &str) -> Option<(usize, u8)> {
-    let b = line.as_bytes();
-    let mut i = b.iter().take_while(|&&c| crate::is_ws(c)).count();
-    if !matches!(b.get(i), Some(b'-' | b'*')) {
-        return None;
-    }
-    i += 1;
-    let ws = b[i..].iter().take_while(|&&c| crate::is_ws(c)).count();
-    if ws == 0 || b.get(i + ws) != Some(&b'[') || b.get(i + ws + 2) != Some(&b']') {
-        return None;
-    }
-    let mark = b[i + ws + 1];
-    matches!(mark, b' ' | b'x' | b'X' | b'-').then_some((i + ws, mark))
-}
-
 /// The coloured spans of a line as (start, end, style). On overlap the one found first wins.
 fn spans(line: &str) -> Vec<(usize, usize, Style)> {
     let b = line.as_bytes();
@@ -147,7 +139,7 @@ fn spans(line: &str) -> Vec<(usize, usize, Style)> {
     }
 
     // The checkbox mark, and a priority `(A)` after it.
-    if let Some((at, mark)) = checkbox(line) {
+    if let Some((at, mark)) = task::checkbox(line) {
         let style = match mark {
             b' ' => Open,
             b'-' => Dim,
@@ -221,7 +213,7 @@ fn spans(line: &str) -> Vec<(usize, usize, Style)> {
 
 fn inline(out: &mut String, pal: &Palette, line: &str) {
     // A cancelled task is struck through as a whole.
-    let base = match checkbox(line) {
+    let base = match task::checkbox(line) {
         Some((_, b'-')) => pal.get(Cancelled),
         _ => "",
     };
@@ -278,11 +270,11 @@ mod tests {
             "```",
             "日本語 #会議 a#b",
         ];
-        let out = render(&lines, &Colors::default());
+        let out = render(&lines, &Colors::default(), None);
         assert_eq!(plain(&out), lines.join("\n") + "\n");
         // Empty colours produce no escape sequences.
-        let none = Colors { heading: String::new(), tag: String::new(), link: String::new(), open: String::new(), done: String::new(), priority: String::new(), due: String::new(), dim: String::new(), cancelled: String::new() };
-        let out = render(&lines, &none);
+        let none = Colors { heading: String::new(), tag: String::new(), link: String::new(), open: String::new(), done: String::new(), priority: String::new(), due: String::new(), dim: String::new(), cancelled: String::new(), mark: String::new() };
+        let out = render(&lines, &none, None);
         assert!(!out.contains('\x1b'));
         assert_eq!(plain(&out), lines.join("\n") + "\n");
     }

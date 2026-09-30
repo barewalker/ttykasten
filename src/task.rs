@@ -18,6 +18,22 @@ pub fn has_tag(text: &str, tag: &str) -> bool {
     })
 }
 
+/// For a checkbox line: where `[m]` starts after the indent and bullet, and the mark.
+pub fn checkbox(line: &str) -> Option<(usize, u8)> {
+    let b = line.as_bytes();
+    let mut i = b.iter().take_while(|&&c| crate::is_ws(c)).count();
+    if !matches!(b.get(i), Some(b'-' | b'*')) {
+        return None;
+    }
+    i += 1;
+    let ws = b[i..].iter().take_while(|&&c| crate::is_ws(c)).count();
+    if ws == 0 || b.get(i + ws) != Some(&b'[') || b.get(i + ws + 2) != Some(&b']') {
+        return None;
+    }
+    let mark = b[i + ws + 1];
+    matches!(mark, b' ' | b'x' | b'X' | b'-').then_some((i + ws, mark))
+}
+
 /// `new_task_line` (§8.8 TaskAdd). None for blank text. `tag` is `require_tag`,
 /// and `id` is the new id added with `on_capture`.
 pub fn new_task_line(

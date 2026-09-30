@@ -17,7 +17,7 @@ use chrono::{Local, NaiveDate, NaiveDateTime};
 use ttykasten::config::{self, Config, MenuItem};
 use ttykasten::i18n::{Msgs, fill};
 use ttykasten::note::{self, Periodic};
-use ttykasten::{fileio, preview, task, template};
+use ttykasten::{blockid, fileio, link, preview, task, template, trim};
 
 fn main() -> ExitCode {
     match run() {
@@ -53,6 +53,11 @@ fn run() -> Result<()> {
     }
     let home = cfg.home()?;
     let app = App { cfg, home, msg };
+    if cmd == "preview" {
+        // Called by fzf as `preview FILE [LINE]`, so the arguments stay apart.
+        let line = rest.get(1).and_then(|l| l.parse::<usize>().ok());
+        return app.preview(rest.first().map(String::as_str).unwrap_or(""), line);
+    }
     let arg = (!rest.is_empty()).then(|| rest.join(" "));
     app.dispatch(cmd, arg)
 }
@@ -67,8 +72,9 @@ impl App {
             "find" => self.find(),
             "new" => self.new_note(arg),
             "log" => self.log(),
-            // The preview next to fzf. Called by fzf, so it is not in the menu.
-            "preview" => self.preview(arg.as_deref().unwrap_or("")),
+            "link" => self.link(),
+            "link-daily" => self.link_daily(),
+            "backlinks" => self.backlinks(),
             _ => {
                 // A key set in the menu also works as an action name.
                 let item = self
@@ -309,12 +315,184 @@ impl App {
         }
     }
 
+    /// Every note file, relative to home. `ignore` is rg's flag for which ignore
+    /// files to disregard: `--no-ignore-vcs` for the finder's view of the
+    /// collection, `--no-ignore` for the plugin's glob (§2.2).
+    fn note_files(&self, ignore: &str) -> Result<Vec<String>> {
+        let glob = format!("*.{}", self.cfg.extension);
+        let out = Command::new("rg")
+            .args(["--files", "--no-messages", ignore, "--glob", &glob])
+            .current_dir(&self.home)
+            .output()
+            .with_context(|| fill(self.msg.cannot_start, &[&"rg"]))?;
+        let text = String::from_utf8_lossy(&out.stdout);
+        Ok(text.lines().map(str::to_string).collect())
+    }
+
+    /// Lists every non-blank line of every note in fzf and returns the one
+    /// picked, as (path relative to home, 0-based index, the line as listed).
+    fn pick_line(&self, prompt: &str) -> Result<Option<(String, usize, String)>> {
+        let mut picked: Vec<(String, usize, String)> = Vec::new();
+        let mut items = String::new();
+        for rel in self.note_files("--no-ignore-vcs")? {
+            let Ok(lines) = fileio::read_lines(&self.home.join(&rel)) else {
+                continue;
+            };
+            for (i, line) in lines.into_iter().enumerate() {
+                if trim(&line).is_empty() {
+                    continue;
+                }
+                let shown = line.replace('\t', " ");
+                items.push_str(&format!("{}\t{rel}\t{}\t{rel}:{}: {shown}\n", picked.len(), i + 1, i + 1));
+                picked.push((rel.clone(), i, line));
+            }
+        }
+        let mut args = vec![
+            "--delimiter=\t".to_string(),
+            "--with-nth=4..".into(),
+            format!("--prompt={prompt}"),
+            "--preview-window=+{3}-/2".into(),
+        ];
+        args.extend(self.preview_arg("{2} {3}")?);
+        let args: Vec<&str> = args.iter().map(String::as_str).collect();
+        let Some(out) = self.fzf(&items, &args)? else {
+            return Ok(None);
+        };
+        Ok(out
+            .first()
+            .and_then(|l| l.split('\t').next())
+            .and_then(|n| n.parse::<usize>().ok())
+            .and_then(|n| picked.into_iter().nth(n)))
+    }
+
+    /// Picks a line and makes a link to it (YankLink, §9.3): the line's id is
+    /// reused, or a new one is written into the note. The link is copied.
+    fn link_line(&self) -> Result<Option<String>> {
+        let Some((rel, idx, listed)) = self.pick_line(self.msg.prompt_line)? else {
+            return Ok(None);
+        };
+        let path = self.home.join(&rel);
+        let mut lines = fileio::read_lines(&path)?;
+        // The note may have been edited while the list was open.
+        if lines.get(idx) != Some(&listed) {
+            bail!(fill(self.msg.line_changed, &[&rel]));
+        }
+        let b = &self.cfg.block_id;
+        let alias = b.alias.then_some((b.alias_max > 0).then_some(b.alias_max));
+        let name = link::note_name(&path);
+        let Some(made) = link::block_link(&lines, idx, &name, b.length, &b.alphabet, alias) else {
+            bail!(self.msg.blank_line);
+        };
+        if let Some(new_line) = made.new_line {
+            lines[idx] = new_line;
+            fileio::write_lines(&path, &lines)
+                .with_context(|| fill(self.msg.cannot_write, &[&path.display()]))?;
+        }
+        self.copy(&made.link);
+        Ok(Some(made.link))
+    }
+
+    fn link(&self) -> Result<()> {
+        if let Some(link) = self.link_line()? {
+            println!("{link}");
+        }
+        Ok(())
+    }
+
+    /// LinkToDaily (§9.4): a link to a line, appended to today's daily note,
+    /// which is made from its template first if it does not exist yet.
+    fn link_daily(&self) -> Result<()> {
+        let Some(link) = self.link_line()? else {
+            return Ok(());
+        };
+        let cfg = &self.cfg;
+        let (kind, now) = (Periodic::Daily, now());
+        let rel = kind.rel(cfg, now);
+        let path = self.home.join(&rel);
+        let mut lines = if path.exists() {
+            fileio::read_lines(&path)?
+        } else {
+            fs::create_dir_all(self.home.join(kind.dir(cfg)))?;
+            template::load(&self.home, &cfg.hdate_format, kind.template(cfg), &kind.name(cfg, now), now)
+                .split('\n')
+                .map(str::to_string)
+                .collect()
+        };
+        lines.push(format!("{}{link}", cfg.block_id.daily_bullet));
+        fileio::write_lines(&path, &lines)
+            .with_context(|| fill(self.msg.cannot_write, &[&path.display()]))?;
+        println!("{}", fill(self.msg.linked_into, &[&link, &rel, &lines.len()]));
+        Ok(())
+    }
+
+    /// Picks a line and lists the lines that link to it: to the line itself
+    /// when it has an id (`[[note#^id]]`, and `[[#^id]]` inside the note), or
+    /// else to its note (§10, where the note's own lines are left out).
+    fn backlinks(&self) -> Result<()> {
+        let Some((rel, _, listed)) = self.pick_line(self.msg.prompt_backlinks)? else {
+            return Ok(());
+        };
+        let name = link::note_name(Path::new(&rel));
+        let id = blockid::read(&listed).map(str::to_string);
+        let target = match &id {
+            Some(id) => format!("[[{name}#^{id}]]"),
+            None => format!("[[{name}]]"),
+        };
+        let glob = format!("*.{}", self.cfg.extension);
+        let out = Command::new("rg")
+            .args(["--no-ignore", "--no-messages", "--null", "--line-number", "--no-heading"])
+            .args(["--color=never", "--fixed-strings", "--glob", &glob, "[["])
+            .current_dir(&self.home)
+            .output()
+            .with_context(|| fill(self.msg.cannot_start, &[&"rg"]))?;
+        let text = String::from_utf8_lossy(&out.stdout);
+        let ext = &self.cfg.extension;
+        let mut items = String::new();
+        for record in text.lines() {
+            let Some((file, rest)) = record.split_once('\0') else {
+                continue;
+            };
+            let Some((lineno, line)) = rest.split_once(':') else {
+                continue;
+            };
+            let same = file == rel;
+            if (id.is_none() && same) || !link::links_to(line, ext, &name, id.as_deref(), same) {
+                continue;
+            }
+            let shown = trim(line).replace('\t', " ");
+            items.push_str(&format!("{file}\t{lineno}\t{file}:{lineno}: {shown}\n"));
+        }
+        if items.is_empty() {
+            eprintln!("ttykasten: {}", fill(self.msg.no_backlinks, &[&target]));
+            return Ok(());
+        }
+        let mut args = vec![
+            "--delimiter=\t".to_string(),
+            "--with-nth=3..".into(),
+            format!("--prompt={}", self.msg.prompt_backlinks),
+            format!("--header={target}"),
+            "--preview-window=+{2}-/2".into(),
+        ];
+        args.extend(self.preview_arg("{1} {2}")?);
+        let args: Vec<&str> = args.iter().map(String::as_str).collect();
+        let Some(out) = self.fzf(&items, &args)? else {
+            return Ok(());
+        };
+        let mut fields = out.first().map(|l| l.split('\t')).into_iter().flatten();
+        match (fields.next(), fields.next().and_then(|n| n.parse::<usize>().ok())) {
+            (Some(file), Some(lineno)) => self.edit_at(&self.home.join(file), lineno),
+            _ => Ok(()),
+        }
+    }
+
     /// Prints a note in colour. Prints nothing if it can't be read (a daily note not yet made).
-    fn preview(&self, rel: &str) -> Result<()> {
+    /// `line` (1-based) is shown in the mark colour.
+    fn preview(&self, rel: &str, line: Option<usize>) -> Result<()> {
         if let Ok(lines) = fileio::read_lines(&self.home.join(rel)) {
             let mut out = std::io::stdout().lock();
+            let mark = line.and_then(|l| l.checked_sub(1));
             // Writing fails when fzf stops reading; that is fine.
-            let _ = out.write_all(preview::render(&lines, &self.cfg.preview.colors).as_bytes());
+            let _ = out.write_all(preview::render(&lines, &self.cfg.preview.colors, mark).as_bytes());
         }
         Ok(())
     }
@@ -398,6 +576,43 @@ impl App {
         Ok((!lines.is_empty()).then_some(lines))
     }
 
+    /// Copies text as `clipboard` says: "osc52" asks the terminal (which also
+    /// works over ssh and mosh), "none" does nothing, and anything else is a
+    /// command that reads the text on stdin. A failure only costs the copy.
+    fn copy(&self, text: &str) {
+        match self.cfg.clipboard.as_str() {
+            "none" | "" => {}
+            "osc52" => {
+                let seq = format!("\x1b]52;c;{}\x07", base64(text.as_bytes()));
+                if let Ok(mut tty) = fs::OpenOptions::new().write(true).open("/dev/tty") {
+                    let _ = tty.write_all(seq.as_bytes());
+                }
+            }
+            command => {
+                let child = Command::new("sh")
+                    .arg("-c")
+                    .arg(command)
+                    .stdin(Stdio::piped())
+                    .spawn();
+                if let Ok(mut child) = child {
+                    if let Some(mut w) = child.stdin.take() {
+                        let _ = w.write_all(text.as_bytes());
+                    }
+                    let _ = child.wait();
+                }
+            }
+        }
+    }
+
+    /// Opens a file in the editor at a line (1-based), using `editor_line`.
+    fn edit_at(&self, path: &Path, line: usize) -> Result<()> {
+        if self.cfg.editor_line.is_empty() {
+            return self.edit(path);
+        }
+        let at = self.cfg.editor_line.replace("{line}", &line.to_string());
+        self.shell(&format!("{} {at} \"$@\"", self.cfg.editor()), &[path])
+    }
+
     /// Opens a file in the editor.
     fn edit(&self, path: &Path) -> Result<()> {
         let editor = self.cfg.editor();
@@ -421,6 +636,37 @@ impl App {
     }
 }
 
+/// Standard base64 with padding, for OSC 52.
+fn base64(bytes: &[u8]) -> String {
+    const TABLE: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);
+    for chunk in bytes.chunks(3) {
+        let n = chunk.iter().enumerate().fold(0u32, |n, (i, &b)| n | u32::from(b) << (16 - 8 * i));
+        for i in 0..4 {
+            if i <= chunk.len() {
+                out.push(TABLE[(n >> (18 - 6 * i) & 63) as usize] as char);
+            } else {
+                out.push('=');
+            }
+        }
+    }
+    out
+}
+
 fn now() -> NaiveDateTime {
     Local::now().naive_local()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::base64;
+
+    #[test]
+    fn base64_encodes() {
+        assert_eq!(base64(b""), "");
+        assert_eq!(base64(b"f"), "Zg==");
+        assert_eq!(base64(b"fo"), "Zm8=");
+        assert_eq!(base64(b"foo"), "Zm9v");
+        assert_eq!(base64("[[n#^a1]]".as_bytes()), "W1tuI15hMV1d");
+    }
 }

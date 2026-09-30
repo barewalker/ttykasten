@@ -27,6 +27,12 @@ pub struct Config {
     pub new_note_template: Option<String>,
     /// Editor that opens notes. Unset: $EDITOR, else nvim.
     pub editor: Option<String>,
+    /// The editor argument that opens a file at a line; `{line}` is replaced.
+    /// Empty: files open at the top.
+    pub editor_line: String,
+    /// Where a link goes: "osc52" (the terminal's clipboard, also over ssh and
+    /// mosh), "none", or a command that reads the link on stdin (e.g. "wl-copy").
+    pub clipboard: String,
     pub notes: Notes,
     pub tasks: Tasks,
     pub block_id: BlockId,
@@ -45,6 +51,8 @@ impl Default for Config {
             hdate_format: "%B %d, %Y".into(),
             new_note_template: None,
             editor: None,
+            editor_line: "+{line}".into(),
+            clipboard: "osc52".into(),
             notes: Notes::default(),
             tasks: Tasks::default(),
             block_id: BlockId::default(),
@@ -141,6 +149,12 @@ pub struct BlockId {
     pub alphabet: String,
     /// Whether captured tasks get an id.
     pub on_capture: bool,
+    /// Written in front of the link that `link-daily` puts into the daily note.
+    pub daily_bullet: String,
+    /// Carry the line's text into the link as an alias: `[[note#^id|text]]`.
+    pub alias: bool,
+    /// Cut the alias to this many characters; 0 keeps it whole.
+    pub alias_max: usize,
 }
 
 impl Default for BlockId {
@@ -149,6 +163,9 @@ impl Default for BlockId {
             length: 6,
             alphabet: "abcdefghijklmnopqrstuvwxyz0123456789".into(),
             on_capture: false,
+            daily_bullet: "- ".into(),
+            alias: false,
+            alias_max: 40,
         }
     }
 }
@@ -202,7 +219,8 @@ pub struct Menu {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct MenuItem {
-    /// A ttykasten action (daily, weekly, capture, find, new, log).
+    /// A ttykasten action (daily, weekly, capture, find, new, log, link,
+    /// link-daily, backlinks).
     pub action: Option<String>,
     /// A command to run instead, with `sh -c`, in home.
     pub command: Option<String>,
@@ -212,7 +230,17 @@ pub struct MenuItem {
     pub label: Option<String>,
 }
 
-pub const ACTIONS: &[&str] = &["daily", "weekly", "capture", "find", "new", "log"];
+pub const ACTIONS: &[&str] = &[
+    "daily",
+    "weekly",
+    "capture",
+    "find",
+    "new",
+    "log",
+    "link",
+    "link-daily",
+    "backlinks",
+];
 
 impl Menu {
     pub fn items(&self) -> Vec<MenuItem> {
@@ -250,6 +278,8 @@ pub struct Colors {
     pub due: String,
     pub dim: String,
     pub cancelled: String,
+    /// The line picked in a list of lines.
+    pub mark: String,
 }
 
 impl Default for Colors {
@@ -264,6 +294,7 @@ impl Default for Colors {
             due: "31".into(),
             dim: "2".into(),
             cancelled: "2;9".into(),
+            mark: "7".into(),
         }
     }
 }
