@@ -143,6 +143,38 @@ pub struct Tasks {
     pub date_lines: usize,
     /// Order of the task list: "priority", "due" or "added".
     pub sort: String,
+    /// fzf keys for the actions in the task list and inbox.
+    pub keys: TaskKeys,
+}
+
+/// Keys in the task list (fzf key names). The defaults are the plugin's
+/// picker keys; `due` has none there, so it takes alt-l.
+#[derive(Debug, Deserialize)]
+#[serde(default)]
+pub struct TaskKeys {
+    pub done: String,
+    pub cancel: String,
+    pub tag: String,
+    pub due: String,
+    pub capture: String,
+    pub undo: String,
+    pub sort: String,
+    pub closed: String,
+}
+
+impl Default for TaskKeys {
+    fn default() -> Self {
+        TaskKeys {
+            done: "ctrl-x".into(),
+            cancel: "ctrl-d".into(),
+            tag: "ctrl-t".into(),
+            due: "alt-l".into(),
+            capture: "alt-a".into(),
+            undo: "alt-u".into(),
+            sort: "alt-s".into(),
+            closed: "alt-x".into(),
+        }
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -183,6 +215,7 @@ impl Default for Tasks {
             date_patterns: Vec::new(),
             date_lines: 10,
             sort: "priority".into(),
+            keys: TaskKeys::default(),
         }
     }
 }
@@ -203,6 +236,8 @@ pub struct BlockId {
     pub alphabet: String,
     /// Whether captured tasks get an id.
     pub on_capture: bool,
+    /// Whether `tag` (TaskTag) gives a line it turns into a task an id.
+    pub on_tag: bool,
     /// Written in front of the link that `link-daily` puts into the daily note.
     pub daily_bullet: String,
     /// Carry the line's text into the link as an alias: `[[note#^id|text]]`.
@@ -217,6 +252,7 @@ impl Default for BlockId {
             length: 6,
             alphabet: "abcdefghijklmnopqrstuvwxyz0123456789".into(),
             on_capture: false,
+            on_tag: false,
             daily_bullet: "- ".into(),
             alias: false,
             alias_max: 40,
@@ -289,6 +325,10 @@ pub const ACTIONS: &[&str] = &[
     "capture",
     "tasks",
     "inbox",
+    "capture-guided",
+    "tag",
+    "mint-ids",
+    "undo",
     "find",
     "new",
     "log",

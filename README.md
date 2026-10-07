@@ -17,8 +17,8 @@ ttykasten find          # find a note, with a coloured preview
 ttykasten link          # pick any line of any note; copy [[note#^id]]
 ```
 
-Status: an early prototype. Acting on tasks from the list (done, cancel,
-due dates) and the week digest are planned (see [docs/design.md](docs/design.md)).
+Status: an early prototype. The week digest and more search views are
+planned (see [docs/design.md](docs/design.md)).
 
 ## Requirements
 
@@ -42,6 +42,10 @@ cargo install --git https://github.com/barewalker/ttykasten
 | `capture [TEXT]` | append a task to the capture note |
 | `tasks` | the task list: open tasks carrying `require_tag`, subtasks under their parent; `alt-s` sorts by priority, due date or when added; enter opens the task's line |
 | `inbox` | checkboxes without the tag, so nothing captured is lost |
+| `capture-guided` | capture a task, then pick tags from the collection and give a due date |
+| `tag` | pick lines (tab marks several) and turn them into tasks: `- [ ] … #todo` |
+| `mint-ids` | pick a note and give each tagged task in it a `^id` |
+| `undo` | undo the last task edit, even from an earlier run |
 | `find` | find a note by path and open it |
 | `new [TITLE]` | create a note from the template and open it |
 | `log` | list recent daily and weekly notes; `ctrl-x` picks a date |
@@ -52,6 +56,14 @@ cargo install --git https://github.com/barewalker/ttykasten
 | `--version` | print the version and the commit it was built from |
 
 Leave out `TEXT` or `TITLE` to type it into an input line.
+
+In `tasks` and `inbox`, keys act on the task under the cursor and the list
+reloads in place: `ctrl-x` done/open, `ctrl-d` cancel/reopen, `ctrl-t` add
+the tag, `alt-l` due date (`fri`, `+3d`, `tomorrow`, `2026-10-02`; blank
+clears), `alt-a` capture, `alt-u` undo, `alt-s` sort, `alt-x` show done and
+cancelled tasks. All keys are configurable (`[tasks.keys]`). An action
+refuses when the line changed after the list was drawn, and every write is
+kept in an undo journal outside the collection.
 
 Links point at a line, not only at a note: `[[note#^id]]` finds its line
 wherever it moves, because the id travels with the line. `link` copies the

@@ -227,6 +227,13 @@ impl<'a> Scanner<'a> {
         }
     }
 
+    /// Which lines of a note can hold a task (§8.3), for TaskTag and minting
+    /// ids, which must not touch a line the scan would skip.
+    pub fn scannable_lines(&self, lines: &[String]) -> Vec<bool> {
+        let (_, fm_end) = frontmatter(lines);
+        self.scannable(lines, fm_end)
+    }
+
     /// Which lines can hold a task (§8.3): below the frontmatter, outside
     /// fences, not headings, and in scope.
     fn scannable(&self, lines: &[String], fm_end: usize) -> Vec<bool> {
@@ -300,7 +307,7 @@ impl<'a> Scanner<'a> {
         }
         let text = blockid::strip(&text);
         let text = trim(&text);
-        let text = unstrike(text);
+        let text = crate::task::unstrike(text);
         Parsed {
             text: trim(text).to_string(),
             priority,
@@ -353,6 +360,17 @@ enum Kind {
     Open,
     Done,
     Cancelled,
+}
+
+/// A short fingerprint of a line (64-bit FNV-1a, hex), so an action from a
+/// list can check that the line is still the one the list showed.
+pub fn line_hash(line: &str) -> String {
+    let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+    for b in line.bytes() {
+        h ^= u64::from(b);
+        h = h.wrapping_mul(0x0100_0000_01b3);
+    }
+    format!("{h:016x}")
 }
 
 /// Picks the tasks wanted from a scan, marks orphans and sorts them.
@@ -489,13 +507,6 @@ fn indent_width(line: &str) -> usize {
         .take_while(|&b| b == b' ' || b == b'\t')
         .map(|b| if b == b'\t' { 4 } else { 1 })
         .sum()
-}
-
-fn unstrike(text: &str) -> &str {
-    match text.strip_prefix("~~").and_then(|t| t.strip_suffix("~~")) {
-        Some(inner) if text.len() >= 4 => inner,
-        _ => text,
-    }
 }
 
 /// Removes `#tag` wherever the next byte is not alphanumeric (`%f[%W]`).

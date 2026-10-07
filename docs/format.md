@@ -1134,10 +1134,12 @@ The following have no file-level meaning:
 6. **Uppercase `[X]`.** *Resolved 2026-09-30:* TaskCancel refuses `[X]` as
    done, like `[x]` (§8.8). It still toggles to open, and TaskDue still
    refuses it as "not open".
-7. **Undo across tools.** The plugin's undo stack lives in memory in each
-   nvim process. Should ttykasten keep a persistent journal (outside the
-   collection), and should it refuse when the line is no longer byte-equal to
-   what it wrote, as the plugin does?
+7. **Undo across tools.** *Resolved 2026-10-07 (ttykasten side):* the
+   plugin's undo stack lives in memory in each nvim process. ttykasten keeps
+   a persistent journal outside the collection
+   (`$XDG_STATE_HOME/ttykasten/undo.jsonl`, the last 50 writes), and, like
+   the plugin, refuses to undo a line that is no longer byte-equal to what it
+   wrote. The two histories stay separate.
 8. **`has_tag` treated `_` and `-` as terminators**, so `#todo-x` and
    `#todo_list` counted as `#todo`. *Resolved 2026-09-30:* the right boundary
    is now `%f[^%w_-]`, matching the tag pattern (§8.5). The left side still

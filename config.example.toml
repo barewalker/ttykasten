@@ -77,10 +77,22 @@ sort = "priority"       # the task list's order: "priority", "due" or "added"
 frontmatter_key = "tasks"   # `tasks: false` (or no / off) opts a note out
 dirs = ["templates"]
 
+# Keys in `tasks` and `inbox` (fzf key names; "" unbinds one).
+[tasks.keys]
+done = "ctrl-x"         # done <-> open
+cancel = "ctrl-d"       # cancel <-> reopen
+tag = "ctrl-t"          # add require_tag (useful in the inbox)
+due = "alt-l"           # set the due date; blank clears
+capture = "alt-a"       # capture with tags and a due date
+undo = "alt-u"
+sort = "alt-s"          # priority -> due -> added
+closed = "alt-x"        # also show done and cancelled tasks
+
 [block_id]
 length = 6
 alphabet = "abcdefghijklmnopqrstuvwxyz0123456789"
 on_capture = false      # give captured tasks a ^id
+on_tag = false          # give lines that `tag` turns into tasks a ^id
 daily_bullet = "- "     # written before the link that `link-daily` adds
 alias = false           # link as [[note#^id|text of the line]]
 alias_max = 40          # cut the alias to this many characters; 0 = whole
@@ -109,8 +121,9 @@ mark = "7"              # the picked line in `link` and `backlinks`
 
 # The menu shown when ttykasten runs with no arguments. Unset: every action,
 # in the default order. Set: only the items written, in the order written.
-#   action   a ttykasten action: daily weekly capture tasks inbox find new
-#            log link link-daily backlinks
+#   action   a ttykasten action: daily weekly capture tasks inbox
+#            capture-guided tag mint-ids undo find new log link link-daily
+#            backlinks
 #   command  a shell command to run instead (sh -c, in home)
 #   key      a hint shown in the list; `ttykasten <key>` also runs the item
 #   label    the description; unset uses the language's default

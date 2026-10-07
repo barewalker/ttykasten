@@ -47,9 +47,9 @@ lives outside it, in a single executable.
 - log: list and create daily and weekly notes
 - find: find notes
 
-Next steps: acting on tasks from the list (done, cancel, due date, tag),
-turning a line into a task, and the week digest. (Block links and the
-read-only task list are done: see Progress.)
+Next steps: the week digest and calendar, then notes and search (romaji
+find, full-text search, tags, recent notes, template picker, rename, link
+graph). (Block links and tasks are done: see Progress.)
 
 ## Language
 
@@ -127,4 +127,27 @@ on every start, so changes need no rebuild.
   `transform` and `reload`, via two hidden subcommands.
 - Checked against the plugin's `collect` + `entry_text` on a real collection:
   task list and inbox, in all three orders, identical line for line.
+
+2026-10-07: acting on tasks (the rest of the task work).
+
+- In `tasks` and `inbox`, keys act on the task under the cursor: done/open,
+  cancel/reopen, tag, due date, guided capture, undo, sort, show closed.
+  The rewrites are the plugin's toggle_line, cancel_line, tag_line (as
+  tag_at uses it) and due_line, with the id kept last; `resolve_due` reads
+  today, tomorrow, +3d, 2w, fri, 明日, 金 and so on.
+- Each list row carries a fingerprint of its line; an action refuses when
+  the line has changed since the list was drawn.
+- fzf runs the actions through `transform` (which also reloads the list and
+  puts the outcome first in the header, so a narrow window cuts the key
+  help, not the message). Actions that need input (due date, capture) run
+  through `execute` and leave their outcome in a status file for the
+  refresh to show.
+- Undo is a journal outside the collection (format.md Q7): every write by
+  a task action, capture, `tag` and `mint-ids` is recorded, and undo refuses
+  a line that changed since.
+- `tag` is TaskTag over picked lines (tab marks several), honouring the
+  scannable rules and `block_id.on_tag`; `mint-ids` is the plugin's
+  BlockIds over a picked note.
+- Checked byte for byte against the plugin's toggle_at, cancel_at, due_at,
+  tag_at, add (guided capture), TaskTag and BlockIds under nvim --headless.
 

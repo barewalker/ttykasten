@@ -55,6 +55,31 @@ pub struct Msgs {
     pub linked_into: &'static str,
     pub bad_pattern: &'static str,
     pub unknown_setting: &'static str,
+    pub tasks_keys: &'static str,
+    pub prompt_due: &'static str,
+    pub prompt_tags: &'static str,
+    pub refused_cancelled: &'static str,
+    pub refused_no_checkbox: &'static str,
+    pub refused_done: &'static str,
+    pub refused_not_open: &'static str,
+    pub refused_bad_date: &'static str,
+    pub refused_nothing_to_tag: &'static str,
+    pub no_require_tag: &'static str,
+    pub due_unchanged: &'static str,
+    pub no_due_to_clear: &'static str,
+    pub undone: &'static str,
+    pub undo_nothing: &'static str,
+    pub undo_changed: &'static str,
+    pub tagged_n: &'static str,
+    pub minted_n: &'static str,
+    pub written: &'static str,
+    pub due_unrecognised: &'static str,
+    pub no_selection: &'static str,
+    pub desc_capture_guided: &'static str,
+    pub desc_tag: &'static str,
+    pub desc_mint_ids: &'static str,
+    pub desc_undo: &'static str,
+    pub prompt_note: &'static str,
 }
 
 const EN: Msgs = Msgs {
@@ -67,6 +92,12 @@ Usage: ttykasten [ACTION] [ARG…]
   capture [TEXT]  append a task to the capture note
   tasks           the task list (alt-s: sort by priority, due date, added)
   inbox           checkboxes that are not tasks yet (no required tag)
+                  in both lists: ctrl-x done, ctrl-d cancel, ctrl-t tag, alt-l due,
+                  alt-a add, alt-u undo, alt-s sort, alt-x show closed (configurable)
+  capture-guided  capture a task, then pick tags and a due date
+  tag             pick lines (tab marks several) and turn them into tasks
+  mint-ids        pick a note and give each tagged task in it an id
+  undo            undo the last task edit (kept across runs)
   find            find a note and open it
   new [TITLE]     create a note from the template
   log             list daily and weekly notes (ctrl-x: pick a date)
@@ -121,6 +152,31 @@ Config: $TTYKASTEN_CONFIG, else $XDG_CONFIG_HOME/ttykasten/config.toml.
     linked_into: "{} -> {}:{}",
     bad_pattern: "bad regex in {}: {}",
     unknown_setting: "{}: unknown setting `{}` ignored (a typo, or a config newer than this ttykasten)",
+    tasks_keys: "enter open · {} done · {} cancel · {} tag · {} due · {} add · {} undo · {} sort · {} closed",
+    prompt_due: "due (blank clears; tomorrow, +3d, fri, 2026-10-02)> ",
+    prompt_tags: "tags (tab marks, enter confirms)> ",
+    refused_cancelled: "that task is cancelled; reopen it first",
+    refused_no_checkbox: "no checkbox on that line",
+    refused_done: "that task is done; a done task is not cancelled",
+    refused_not_open: "only an open task takes a due date",
+    refused_bad_date: "not a due date: {}",
+    refused_nothing_to_tag: "nothing to tag there",
+    no_require_tag: "tasks.require_tag is not set",
+    due_unchanged: "due date unchanged",
+    no_due_to_clear: "no due date to clear",
+    undone: "undone: {}:{}",
+    undo_nothing: "nothing to undo",
+    undo_changed: "{}:{} has changed since; left as it is",
+    tagged_n: "tagged: {} line(s)",
+    minted_n: "ids minted: {}",
+    written: "{}:{}: {}",
+    due_unrecognised: "didn't recognise '{}'; captured without a due date",
+    no_selection: "no task selected",
+    desc_capture_guided: "Capture a task with tags and a due date",
+    desc_tag: "Turn lines into tasks (tab marks several)",
+    desc_mint_ids: "Give every tagged task in a note an id",
+    desc_undo: "Undo the last task edit",
+    prompt_note: "note> ",
 };
 
 const JA: Msgs = Msgs {
@@ -133,6 +189,12 @@ const JA: Msgs = Msgs {
   capture [文]    タスクを書き留める
   tasks           タスク一覧 (alt-s で優先度・期日・追加順に並べ替え)
   inbox           まだタスクになっていないチェックボックス (タグ無し)
+                  一覧のキー: ctrl-x 完了, ctrl-d 取消, ctrl-t タグ, alt-l 期日,
+                  alt-a 追加, alt-u 戻す, alt-s 並べ替え, alt-x 済みも表示 (設定で変更可)
+  capture-guided  タスクを書き留め、タグと期日も選ぶ
+  tag             行を選んで (tab で複数) タスクにする
+  mint-ids        ノートを選び、タグの付いたタスクに id を付ける
+  undo            直前のタスクの書き換えを戻す (起動をまたいで残る)
   find            ノートを探して開く
   new [題名]      雛形から新しいノートを作る
   log             日誌と週まとめの一覧 (ctrl-x で日付を指定)
@@ -187,6 +249,31 @@ const JA: Msgs = Msgs {
     linked_into: "{} -> {}:{}",
     bad_pattern: "{} の正規表現が不正: {}",
     unknown_setting: "{}: 知らない設定 `{}` を無視した (綴りの誤りか、設定がこの ttykasten より新しい)",
+    tasks_keys: "enter 開く · {} 完了 · {} 取消 · {} タグ · {} 期日 · {} 追加 · {} 戻す · {} 並べ替え · {} 済みも表示",
+    prompt_due: "期日 (空で消す。明日, +3d, 金, 2026-10-02)> ",
+    prompt_tags: "タグ (tab で選ぶ、enter で決定)> ",
+    refused_cancelled: "取り消したタスクは完了にできない。先に再開する",
+    refused_no_checkbox: "その行にチェックボックスが無い",
+    refused_done: "完了したタスクは取り消せない",
+    refused_not_open: "期日を付けられるのは未完了のタスクだけ",
+    refused_bad_date: "期日として読めない: {}",
+    refused_nothing_to_tag: "タグを付けるものが無い",
+    no_require_tag: "tasks.require_tag が設定されていない",
+    due_unchanged: "期日は変わらない",
+    no_due_to_clear: "消す期日が無い",
+    undone: "戻した: {}:{}",
+    undo_nothing: "戻すものが無い",
+    undo_changed: "{}:{} はその後に書き換わったので、戻さない",
+    tagged_n: "タスクにした行: {}",
+    minted_n: "付けた id: {}",
+    written: "{}:{}: {}",
+    due_unrecognised: "'{}' を期日として読めないので、期日なしで書き留めた",
+    no_selection: "タスクが選ばれていない",
+    desc_capture_guided: "タグと期日も付けてタスクを書き留める",
+    desc_tag: "行をタスクにする (tab で複数選べる)",
+    desc_mint_ids: "ノートのタスクに id を付ける",
+    desc_undo: "直前のタスクの書き換えを戻す",
+    prompt_note: "note> ",
 };
 
 impl Language {
@@ -213,6 +300,10 @@ impl Msgs {
             "backlinks" => self.desc_backlinks,
             "tasks" => self.desc_tasks,
             "inbox" => self.desc_inbox,
+            "capture-guided" => self.desc_capture_guided,
+            "tag" => self.desc_tag,
+            "mint-ids" => self.desc_mint_ids,
+            "undo" => self.desc_undo,
             _ => return None,
         })
     }

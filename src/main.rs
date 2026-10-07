@@ -5,6 +5,7 @@
 //! to learn (docs/design.md). Locations, formats, the menu, the language and
 //! the colours all come from the config file (config.rs).
 
+use std::collections::HashMap;
 use std::env;
 use std::fs;
 use std::io::Write;
@@ -17,6 +18,7 @@ use chrono::{Local, NaiveDate, NaiveDateTime};
 use ttykasten::config::{self, Config, MenuItem};
 use ttykasten::i18n::{Msgs, fill};
 use ttykasten::note::{self, Periodic};
+use ttykasten::journal::{Entry, Journal, Undo};
 use ttykasten::tasks::{self, Scanner, Sort, Want};
 use ttykasten::{blockid, fileio, link, preview, task, template, trim};
 
@@ -65,8 +67,14 @@ fn run() -> Result<()> {
     }
     match cmd {
         // Called by fzf to fill and re-sort the task list.
-        "task-lines" => return app.print_task_lines(rest.first().map(String::as_str), rest.get(1).map(String::as_str)),
-        "task-sort-next" => return app.print_sort_next(rest.first().map(String::as_str)),
+        "task-lines" => return app.print_task_lines(rest),
+        "task-key" => return app.task_key(rest),
+        "task-due" => return app.task_due(rest),
+        "task-capture" => {
+            let message = app.capture_guided()?.unwrap_or_default();
+            app.set_status(&message);
+            return Ok(());
+        }
         _ => {}
     }
     let arg = (!rest.is_empty()).then(|| rest.join(" "));
@@ -85,6 +93,18 @@ impl App {
             "log" => self.log(),
             "tasks" => self.task_list(false),
             "inbox" => self.task_list(true),
+            "capture-guided" => {
+                if let Some(m) = self.capture_guided()? {
+                    println!("{m}");
+                }
+                Ok(())
+            }
+            "tag" => self.tag_lines(),
+            "mint-ids" => self.mint_ids(),
+            "undo" => {
+                println!("{}", self.undo_message()?);
+                Ok(())
+            }
             "link" => self.link(),
             "link-daily" => self.link_daily(),
             "backlinks" => self.backlinks(),
@@ -201,12 +221,8 @@ impl App {
         let Some(text) = self.arg_or_input(arg, self.msg.prompt_task)? else {
             return Ok(());
         };
-        let path = self.home.join(rel);
-        match task::capture(&self.cfg, &path, &text, None)
-            .with_context(|| fill(self.msg.cannot_write, &[&path.display()]))?
-        {
-            Some(line) => println!("{}", fill(self.msg.captured, &[&rel, &line])),
-            None => eprintln!("ttykasten: {}", self.msg.nothing_captured),
+        if let Some(m) = self.capture_text(rel, &text, None)? {
+            println!("{m}");
         }
         Ok(())
     }
@@ -329,22 +345,36 @@ impl App {
     }
 
     /// The task list or the inbox in fzf (§8). Enter opens the note at the
-    /// task's line; alt-s cycles the order.
+    /// task's line; the keys in `tasks.keys` act on the task under the cursor
+    /// and reload the list.
     fn task_list(&self, inbox: bool) -> Result<()> {
-        let kind = if inbox { "inbox" } else { "tasks" };
-        let sort = Sort::parse(&self.cfg.tasks.sort);
-        let lines = self.task_lines(inbox, sort)?;
+        let view = View { inbox, sort: Sort::parse(&self.cfg.tasks.sort), closed: false };
+        let lines = self.task_lines(view)?;
         let exe = self.self_command()?;
+        let kind = view.kind();
+        let k = &self.cfg.tasks.keys;
+        let line = "{1} {2} {3}";
+        let refresh = format!("transform:{exe} task-key refresh {kind}");
+        let binds = [
+            (&k.done, format!("transform:{exe} task-key done {kind} {line}")),
+            (&k.cancel, format!("transform:{exe} task-key cancel {kind} {line}")),
+            (&k.tag, format!("transform:{exe} task-key tag {kind} {line}")),
+            (&k.undo, format!("transform:{exe} task-key undo {kind}")),
+            (&k.sort, format!("transform:{exe} task-key sort {kind}")),
+            (&k.closed, format!("transform:{exe} task-key closed {kind}")),
+            (&k.due, format!("execute({exe} task-due {line})+{refresh}")),
+            (&k.capture, format!("execute({exe} task-capture)+{refresh}")),
+        ];
         let mut args = vec![
             "--delimiter=\t".to_string(),
-            "--with-nth=3..".into(),
+            "--with-nth=4..".into(),
             "--ansi".into(),
             "--no-sort".into(),
-            format!("--prompt={}", self.sort_prompt(inbox, sort)),
-            format!("--header={}", self.msg.tasks_header),
+            format!("--prompt={}", self.view_prompt(view)),
+            format!("--header={}", self.keys_header()),
             "--preview-window=+{2}-/2".into(),
-            format!("--bind=alt-s:transform:{exe} task-sort-next {kind}"),
         ];
+        args.extend(binds.iter().filter(|(key, _)| !key.is_empty()).map(|(key, act)| format!("--bind={key}:{act}")));
         args.extend(self.preview_arg("{1} {2}")?);
         let args: Vec<&str> = args.iter().map(String::as_str).collect();
         let Some(out) = self.fzf(&lines, &args)? else {
@@ -357,19 +387,29 @@ impl App {
         }
     }
 
-    fn sort_prompt(&self, inbox: bool, sort: Sort) -> String {
-        let name = if inbox { self.msg.prompt_inbox } else { self.msg.prompt_tasks };
-        let by = match sort {
+    fn keys_header(&self) -> String {
+        let k = &self.cfg.tasks.keys;
+        let keys: [&dyn std::fmt::Display; 8] =
+            [&k.done, &k.cancel, &k.tag, &k.due, &k.capture, &k.undo, &k.sort, &k.closed];
+        fill(self.msg.tasks_keys, &keys)
+    }
+
+    /// The prompt carries the view, so the keys' commands can read it back
+    /// from $FZF_PROMPT: `tasks [due +closed]> `.
+    fn view_prompt(&self, view: View) -> String {
+        let name = if view.inbox { self.msg.prompt_inbox } else { self.msg.prompt_tasks };
+        let by = match view.sort {
             Sort::Priority => "priority",
             Sort::Due => "due",
             Sort::Added => "added",
         };
-        format!("{name} [{by}]> ")
+        let closed = if view.closed { " +closed" } else { "" };
+        format!("{name} [{by}{closed}]> ")
     }
 
-    /// The list's lines for fzf: path, line number, and what is shown (the
-    /// entry, then the note and line dimmed).
-    fn task_lines(&self, inbox: bool, sort: Sort) -> Result<String> {
+    /// The list's lines for fzf: path, line number, the line's fingerprint,
+    /// and what is shown (the entry, then the note and line dimmed).
+    fn task_lines(&self, view: View) -> Result<String> {
         let scanner = Scanner::new(&self.cfg)
             .map_err(|e| anyhow!(fill(self.msg.bad_pattern, &[&"tasks.date_patterns / tasks.headings", &e])))?;
         let cutoff = self
@@ -378,18 +418,28 @@ impl App {
             .since_days
             .map(|n| note::days_from(now(), -i64::from(n)).format("%Y-%m-%d").to_string());
         let mut all = Vec::new();
+        let mut texts: HashMap<String, Vec<String>> = HashMap::new();
         for rel in self.checkbox_notes()? {
             if let Ok(lines) = fileio::read_lines(&self.home.join(&rel)) {
                 scanner.scan_note(&rel, &lines, cutoff.as_deref(), &mut all);
+                texts.insert(rel, lines);
             }
         }
-        let want = Want { inbox, ..Want::default() };
+        let want = Want { inbox: view.inbox, done: view.closed, cancelled: view.closed };
         let mut out = String::new();
-        for t in tasks::select(all, want, sort) {
+        for t in tasks::select(all, want, view.sort) {
+            let raw = texts.get(&t.rel).and_then(|l| l.get(t.lineno - 1)).map_or("", String::as_str);
+            let state = match (view.closed, t.done, t.cancelled) {
+                (false, _, _) => "",
+                (true, true, _) => "[x] ",
+                (true, _, true) => "[-] ",
+                _ => "[ ] ",
+            };
             out.push_str(&format!(
-                "{}\t{}\t{}  \x1b[2m{}:{}\x1b[0m\n",
+                "{}\t{}\t{}\t{state}{}  \x1b[2m{}:{}\x1b[0m\n",
                 t.rel,
                 t.lineno,
+                tasks::line_hash(raw),
                 scanner.entry_text(&t),
                 t.rel,
                 t.lineno
@@ -412,36 +462,417 @@ impl App {
         Ok(text.lines().map(str::to_string).collect())
     }
 
-    /// `task-lines KIND SORT`, for fzf's reload.
-    fn print_task_lines(&self, kind: Option<&str>, sort: Option<&str>) -> Result<()> {
-        let lines = self.task_lines(kind == Some("inbox"), Sort::parse(sort.unwrap_or("")))?;
+    /// `task-lines KIND SORT [closed]`, for fzf's reload.
+    fn print_task_lines(&self, args: &[String]) -> Result<()> {
+        let view = View {
+            inbox: args.first().map(String::as_str) == Some("inbox"),
+            sort: Sort::parse(args.get(1).map_or("", String::as_str)),
+            closed: args.get(2).map(String::as_str) == Some("closed"),
+        };
+        let lines = self.task_lines(view)?;
         let _ = std::io::stdout().lock().write_all(lines.as_bytes());
         Ok(())
     }
 
-    /// `task-sort-next KIND`: reads the current order from fzf's prompt
-    /// ($FZF_PROMPT) and prints the fzf actions that switch to the next one.
-    fn print_sort_next(&self, kind: Option<&str>) -> Result<()> {
-        let inbox = kind == Some("inbox");
-        let prompt = env::var("FZF_PROMPT").unwrap_or_default();
-        let current = prompt
-            .rsplit_once('[')
-            .and_then(|(_, r)| r.split_once(']'))
-            .map(|(s, _)| Sort::parse(s))
-            .unwrap_or(Sort::Priority);
-        let next = match current {
-            Sort::Priority => ("due", Sort::Due),
-            Sort::Due => ("added", Sort::Added),
-            Sort::Added => ("priority", Sort::Priority),
+    /// `task-key ACTION KIND [REL LINENO HASH]`, run by fzf's `transform`:
+    /// does the action, then prints the fzf actions that reload the list and
+    /// show the outcome in the header. The view is read from $FZF_PROMPT.
+    fn task_key(&self, args: &[String]) -> Result<()> {
+        let arg = |i: usize| args.get(i).map_or("", String::as_str);
+        let mut view = View::from_prompt(arg(1) == "inbox", &env::var("FZF_PROMPT").unwrap_or_default());
+        let message = match arg(0) {
+            "sort" => {
+                view.sort = match view.sort {
+                    Sort::Priority => Sort::Due,
+                    Sort::Due => Sort::Added,
+                    Sort::Added => Sort::Priority,
+                };
+                String::new()
+            }
+            "closed" => {
+                view.closed = !view.closed;
+                String::new()
+            }
+            "refresh" => self.take_status(),
+            "undo" => self.undo_message()?,
+            action => self.act_on_line(action, arg(2), arg(3), arg(4))?,
         };
         let exe = self.self_command()?;
+        let closed = if view.closed { " closed" } else { "" };
+        let sort = match view.sort {
+            Sort::Priority => "priority",
+            Sort::Due => "due",
+            Sort::Added => "added",
+        };
+        let header = if message.is_empty() {
+            self.keys_header()
+        } else {
+            // The message first: a narrow window cuts the end of the header.
+            format!("{message}  │  {}", self.keys_header())
+        };
+        // change-header takes the rest of the string, so it goes last.
         println!(
-            "change-prompt({})+reload({exe} task-lines {} {})",
-            self.sort_prompt(inbox, next.1),
-            if inbox { "inbox" } else { "tasks" },
-            next.0
+            "change-prompt({})+reload({exe} task-lines {} {sort}{closed})+change-header:{header}",
+            self.view_prompt(view),
+            view.kind()
         );
         Ok(())
+    }
+
+    /// Done, cancel or tag on one listed line. Refuses when the line is no
+    /// longer the one the list showed. Returns the message for the header.
+    fn act_on_line(&self, action: &str, rel: &str, lineno: &str, hash: &str) -> Result<String> {
+        let Ok(lineno) = lineno.parse::<usize>() else {
+            return Ok(self.msg.no_selection.to_string());
+        };
+        let tag = self.cfg.tasks.require_tag.clone();
+        let now = now();
+        self.rewrite_listed(rel, lineno, hash, |line| match action {
+            "done" => task::toggle_line(line, now),
+            "cancel" => task::cancel_line(line, now.date()),
+            "tag" => {
+                let Some(tag) = &tag else {
+                    return Err(task::Refusal::NothingToTag);
+                };
+                // From a list, only an open or done task is tagged (tag_at).
+                match task::checkbox(line) {
+                    Some((_, b' ' | b'x' | b'X')) => task::tag_line(line, tag, &self.cfg.tasks.new_checkbox),
+                    _ => Err(task::Refusal::NoCheckbox),
+                }
+            }
+            _ => Err(task::Refusal::NoCheckbox),
+        })
+        .map(|r| match (action, &tag, r) {
+            ("tag", None, Err(_)) => self.msg.no_require_tag.to_string(),
+            (_, _, Ok(m)) | (_, _, Err(m)) => m,
+        })
+    }
+
+    /// Rewrites line `lineno` of `rel` if its fingerprint is still `hash`,
+    /// records it for undo, and returns Ok(message) on success or Err(message)
+    /// when nothing was written.
+    fn rewrite_listed(
+        &self,
+        rel: &str,
+        lineno: usize,
+        hash: &str,
+        rewrite: impl FnOnce(&str) -> Result<String, task::Refusal>,
+    ) -> Result<Result<String, String>> {
+        let path = self.home.join(rel);
+        let mut lines = fileio::read_lines(&path)?;
+        let Some(line) = lines.get(lineno.wrapping_sub(1)).cloned() else {
+            return Ok(Err(fill(self.msg.line_changed, &[&rel])));
+        };
+        if tasks::line_hash(&line) != hash {
+            return Ok(Err(fill(self.msg.line_changed, &[&rel])));
+        }
+        let out = match rewrite(&line) {
+            Ok(out) => out,
+            Err(why) => return Ok(Err(self.refusal(why, ""))),
+        };
+        lines[lineno - 1] = out.clone();
+        fileio::write_lines(&path, &lines).with_context(|| fill(self.msg.cannot_write, &[&path.display()]))?;
+        self.remember(rel, lineno, Some(line), &out);
+        Ok(Ok(fill(self.msg.written, &[&rel, &lineno, &trim(&out)])))
+    }
+
+    fn refusal(&self, why: task::Refusal, detail: &str) -> String {
+        use task::Refusal::*;
+        match why {
+            NoCheckbox => self.msg.refused_no_checkbox.to_string(),
+            Cancelled => self.msg.refused_cancelled.to_string(),
+            Done => self.msg.refused_done.to_string(),
+            NotOpen => self.msg.refused_not_open.to_string(),
+            BadDate => fill(self.msg.refused_bad_date, &[&detail]),
+            NothingToTag => self.msg.refused_nothing_to_tag.to_string(),
+        }
+    }
+
+    /// `task-due REL LINENO HASH [SPEC]`, run by fzf's `execute`: asks for a due
+    /// date and sets it (TaskDue). The outcome goes to the status file, which
+    /// the list's refresh shows.
+    fn task_due(&self, args: &[String]) -> Result<()> {
+        let arg = |i: usize| args.get(i).map_or("", String::as_str);
+        let Ok(lineno) = arg(1).parse::<usize>() else {
+            self.set_status(self.msg.no_selection);
+            return Ok(());
+        };
+        // A fourth argument gives the date without asking (for scripts).
+        let spec = match args.get(3) {
+            Some(spec) => spec.clone(),
+            None => match self.input(self.msg.prompt_due)? {
+                Some(spec) => spec,
+                None => return Ok(()),
+            },
+        };
+        let message = match self.set_due(arg(0), lineno, arg(2), &spec)? {
+            Ok(m) | Err(m) => m,
+        };
+        self.set_status(&message);
+        Ok(())
+    }
+
+    /// TaskDue on a listed line: `spec` is resolved (blank clears).
+    fn set_due(&self, rel: &str, lineno: usize, hash: &str, spec: &str) -> Result<Result<String, String>> {
+        let spec = trim(spec);
+        let date = if spec.is_empty() {
+            String::new()
+        } else {
+            match task::resolve_due(spec, now().date()) {
+                Some(d) => d,
+                None => return Ok(Err(self.refusal(task::Refusal::BadDate, spec))),
+            }
+        };
+        let unchanged = if spec.is_empty() { self.msg.no_due_to_clear } else { self.msg.due_unchanged };
+        let mut same = false;
+        let r = self.rewrite_listed(rel, lineno, hash, |line| {
+            let out = task::due_line(line, &date)?;
+            same = out == line;
+            // An unchanged line is not written; report it as a refusal.
+            if same { Err(task::Refusal::NothingToTag) } else { Ok(out) }
+        })?;
+        Ok(match r {
+            Err(_) if same => Err(unchanged.to_string()),
+            other => other,
+        })
+    }
+
+    /// The guided capture (`capture-guided`, alt-a in the list): the text,
+    /// then tags picked from the collection, then a due date.
+    fn capture_guided(&self) -> Result<Option<String>> {
+        let Some(rel) = self.cfg.tasks.capture_target() else {
+            bail!(self.msg.no_capture_note);
+        };
+        let Some(text) = self.input(self.msg.prompt_task)? else {
+            return Ok(None);
+        };
+        if trim(&text).is_empty() {
+            return Ok(None);
+        }
+        let tags = self.collect_tags()?;
+        let picked = if tags.is_empty() {
+            Vec::new()
+        } else {
+            let list: String = tags.iter().map(|t| format!("{t}\n")).collect();
+            match self.fzf(&list, &["--multi", &format!("--prompt={}", self.msg.prompt_tags)])? {
+                Some(p) => p,
+                // Esc on the tags cancels the capture, as in the plugin.
+                None => return Ok(None),
+            }
+        };
+        let body = task::with_tags(trim(&text), &picked);
+        let spec = self.input(self.msg.prompt_due)?.unwrap_or_default();
+        let mut notes = Vec::new();
+        let due = if trim(&spec).is_empty() {
+            None
+        } else {
+            let d = task::resolve_due(&spec, now().date());
+            if d.is_none() {
+                notes.push(fill(self.msg.due_unrecognised, &[&trim(&spec)]));
+            }
+            d
+        };
+        let captured = self.capture_text(rel, &body, due.as_deref())?;
+        notes.extend(captured);
+        Ok(Some(notes.join("  ")))
+    }
+
+    /// Appends a task to the capture note and records it for undo.
+    fn capture_text(&self, rel: &str, text: &str, due: Option<&str>) -> Result<Option<String>> {
+        let path = self.home.join(rel);
+        match task::capture(&self.cfg, &path, text, due).with_context(|| fill(self.msg.cannot_write, &[&path.display()]))? {
+            Some((line, lineno)) => {
+                self.remember(rel, lineno, None, &line);
+                Ok(Some(fill(self.msg.captured, &[&rel, &line])))
+            }
+            None => Ok(Some(self.msg.nothing_captured.to_string())),
+        }
+    }
+
+    /// Every `#tag` in the collection, sorted, with the required tag first
+    /// (`collect_tags`).
+    fn collect_tags(&self) -> Result<Vec<String>> {
+        let glob = format!("*.{}", self.cfg.extension);
+        let out = Command::new("rg")
+            .args(["--no-filename", "--no-messages", "--no-line-number", "-o", "--glob", &glob])
+            .args(["-e", "#[A-Za-z0-9_-]+"])
+            .current_dir(&self.home)
+            .output()
+            .with_context(|| fill(self.msg.cannot_start, &[&"rg"]))?;
+        let text = String::from_utf8_lossy(&out.stdout);
+        let front = self.cfg.tasks.require_tag.as_ref().map(|t| format!("#{t}"));
+        let mut set: Vec<String> = text.lines().filter(|t| Some(*t) != front.as_deref()).map(str::to_string).collect();
+        set.sort();
+        set.dedup();
+        if let Some(f) = front {
+            set.insert(0, f);
+        }
+        Ok(set)
+    }
+
+    /// TaskTag over picked lines (tab marks several): each scannable line is
+    /// made a task carrying `require_tag`, with a new id when `on_tag`.
+    fn tag_lines(&self) -> Result<()> {
+        let Some(tag) = self.cfg.tasks.require_tag.clone() else {
+            bail!(self.msg.no_require_tag);
+        };
+        let picked = self.pick_lines(self.msg.prompt_line, true)?;
+        if picked.is_empty() {
+            return Ok(());
+        }
+        let scanner = Scanner::new(&self.cfg)
+            .map_err(|e| anyhow!(fill(self.msg.bad_pattern, &[&"tasks.headings", &e])))?;
+        let mut by_note: Vec<(String, Vec<(usize, String)>)> = Vec::new();
+        for (rel, idx, listed) in picked {
+            match by_note.iter_mut().find(|(r, _)| *r == rel) {
+                Some((_, v)) => v.push((idx, listed)),
+                None => by_note.push((rel, vec![(idx, listed)])),
+            }
+        }
+        let b = &self.cfg.block_id;
+        let mut tagged = 0;
+        for (rel, picks) in by_note {
+            let path = self.home.join(&rel);
+            let mut lines = fileio::read_lines(&path)?;
+            let scannable = scanner.scannable_lines(&lines);
+            let mut taken = blockid::ids_in(&lines);
+            let mut changed = Vec::new();
+            for (idx, listed) in picks {
+                if lines.get(idx) != Some(&listed) {
+                    eprintln!("ttykasten: {}", fill(self.msg.line_changed, &[&rel]));
+                    continue;
+                }
+                if !scannable[idx] {
+                    continue;
+                }
+                let Ok(mut out) = task::tag_line(&listed, &tag, &self.cfg.tasks.new_checkbox) else {
+                    continue;
+                };
+                if b.on_tag && blockid::read(&out).is_none() {
+                    let id = blockid::mint(&taken, b.length, &b.alphabet);
+                    taken.insert(id.clone());
+                    out = blockid::with_id(&out, &id);
+                }
+                lines[idx] = out.clone();
+                changed.push((idx, listed, out));
+            }
+            if changed.is_empty() {
+                continue;
+            }
+            fileio::write_lines(&path, &lines).with_context(|| fill(self.msg.cannot_write, &[&path.display()]))?;
+            for (idx, before, after) in changed {
+                self.remember(&rel, idx + 1, Some(before), &after);
+                println!("{}", fill(self.msg.written, &[&rel, &(idx + 1), &trim(&after)]));
+                tagged += 1;
+            }
+        }
+        if tagged == 0 {
+            eprintln!("ttykasten: {}", self.msg.refused_nothing_to_tag);
+        }
+        Ok(())
+    }
+
+    /// Mint ids (`:FzfKastenBlockIds`): every scannable checkbox in a picked
+    /// note that has none and carries `require_tag` gets one.
+    fn mint_ids(&self) -> Result<()> {
+        let files = self.note_files("--no-ignore-vcs")?;
+        let list: String = files.iter().map(|f| format!("{f}\n")).collect();
+        let mut args = vec!["--scheme=path".to_string(), format!("--prompt={}", self.msg.prompt_note)];
+        args.extend(self.preview_arg("{}")?);
+        let args: Vec<&str> = args.iter().map(String::as_str).collect();
+        let Some(out) = self.fzf(&list, &args)? else {
+            return Ok(());
+        };
+        let Some(rel) = out.first().filter(|r| !r.is_empty()).cloned() else {
+            return Ok(());
+        };
+        let scanner = Scanner::new(&self.cfg)
+            .map_err(|e| anyhow!(fill(self.msg.bad_pattern, &[&"tasks.headings", &e])))?;
+        let path = self.home.join(&rel);
+        let mut lines = fileio::read_lines(&path)?;
+        let scannable = scanner.scannable_lines(&lines);
+        let b = &self.cfg.block_id;
+        let tag = self.cfg.tasks.require_tag.as_deref();
+        let mut taken = blockid::ids_in(&lines);
+        let mut changed = Vec::new();
+        for (i, line) in lines.iter_mut().enumerate() {
+            let eligible = scannable[i]
+                && task::checkbox(line).is_some()
+                && blockid::read(line).is_none()
+                && tag.is_none_or(|t| task::has_tag(line, t));
+            if eligible {
+                let id = blockid::mint(&taken, b.length, &b.alphabet);
+                taken.insert(id.clone());
+                let out = blockid::with_id(line, &id);
+                changed.push((i, line.clone(), out.clone()));
+                *line = out;
+            }
+        }
+        if !changed.is_empty() {
+            fileio::write_lines(&path, &lines).with_context(|| fill(self.msg.cannot_write, &[&path.display()]))?;
+            for (i, before, after) in &changed {
+                self.remember(&rel, i + 1, Some(before.clone()), after);
+            }
+        }
+        println!("{}", fill(self.msg.minted_n, &[&changed.len()]));
+        Ok(())
+    }
+
+    fn journal(&self) -> Option<Journal> {
+        Journal::default_path().map(Journal::new)
+    }
+
+    /// Records a write for undo. A journal that can't be written costs only
+    /// the undo, so it is reported and the edit stands.
+    fn remember(&self, rel: &str, lineno: usize, before: Option<String>, after: &str) {
+        let Some(j) = self.journal() else {
+            return;
+        };
+        let entry = Entry {
+            home: self.home.to_string_lossy().into(),
+            rel: rel.to_string(),
+            lineno,
+            before,
+            after: after.to_string(),
+        };
+        if let Err(e) = j.record(entry) {
+            eprintln!("ttykasten: undo journal: {e}");
+        }
+    }
+
+    fn undo_message(&self) -> Result<String> {
+        let Some(j) = self.journal() else {
+            return Ok(self.msg.undo_nothing.to_string());
+        };
+        Ok(match j.undo(&self.home)? {
+            Undo::Nothing => self.msg.undo_nothing.to_string(),
+            Undo::Changed(e) => fill(self.msg.undo_changed, &[&e.rel, &e.lineno]),
+            Undo::Undone(e) => fill(self.msg.undone, &[&e.rel, &e.lineno]),
+        })
+    }
+
+    /// A message left for the task list by a command fzf ran with `execute`,
+    /// which has no other way back to the list's header.
+    fn status_path(&self) -> Option<PathBuf> {
+        Journal::default_path().map(|p| p.with_file_name("status"))
+    }
+
+    fn set_status(&self, message: &str) {
+        if let Some(p) = self.status_path() {
+            if let Some(dir) = p.parent() {
+                let _ = fs::create_dir_all(dir);
+            }
+            let _ = fs::write(p, message);
+        }
+    }
+
+    fn take_status(&self) -> String {
+        let Some(p) = self.status_path() else {
+            return String::new();
+        };
+        let message = fs::read_to_string(&p).unwrap_or_default();
+        let _ = fs::remove_file(p);
+        message.replace(['\n', '\r'], " ")
     }
 
     /// This executable, quoted for a shell command line.
@@ -467,6 +898,11 @@ impl App {
     /// Lists every non-blank line of every note in fzf and returns the one
     /// picked, as (path relative to home, 0-based index, the line as listed).
     fn pick_line(&self, prompt: &str) -> Result<Option<(String, usize, String)>> {
+        Ok(self.pick_lines(prompt, false)?.into_iter().next())
+    }
+
+    /// Like `pick_line`; with `multi`, tab marks several lines.
+    fn pick_lines(&self, prompt: &str, multi: bool) -> Result<Vec<(String, usize, String)>> {
         let mut picked: Vec<(String, usize, String)> = Vec::new();
         let mut items = String::new();
         for rel in self.note_files("--no-ignore-vcs")? {
@@ -488,16 +924,20 @@ impl App {
             format!("--prompt={prompt}"),
             "--preview-window=+{3}-/2".into(),
         ];
+        if multi {
+            args.push("--multi".into());
+        }
         args.extend(self.preview_arg("{2} {3}")?);
         let args: Vec<&str> = args.iter().map(String::as_str).collect();
         let Some(out) = self.fzf(&items, &args)? else {
-            return Ok(None);
+            return Ok(Vec::new());
         };
-        Ok(out
-            .first()
-            .and_then(|l| l.split('\t').next())
-            .and_then(|n| n.parse::<usize>().ok())
-            .and_then(|n| picked.into_iter().nth(n)))
+        let chosen: Vec<usize> = out
+            .iter()
+            .filter_map(|l| l.split('\t').next())
+            .filter_map(|n| n.parse::<usize>().ok())
+            .collect();
+        Ok(chosen.into_iter().filter_map(|n| picked.get(n).cloned()).collect())
     }
 
     /// Picks a line and makes a link to it (YankLink, §9.3): the line's id is
@@ -812,5 +1252,31 @@ mod tests {
         assert_eq!(base64(b"fo"), "Zm8=");
         assert_eq!(base64(b"foo"), "Zm9v");
         assert_eq!(base64("[[n#^a1]]".as_bytes()), "W1tuI15hMV1d");
+    }
+}
+
+/// What the task list shows: tasks or the inbox, the order, and whether
+/// done and cancelled tasks are included.
+#[derive(Clone, Copy)]
+struct View {
+    inbox: bool,
+    sort: Sort,
+    closed: bool,
+}
+
+impl View {
+    fn kind(self) -> &'static str {
+        if self.inbox { "inbox" } else { "tasks" }
+    }
+
+    /// Reads the view back from a prompt made by `view_prompt`.
+    fn from_prompt(inbox: bool, prompt: &str) -> View {
+        let inside = prompt
+            .rsplit_once('[')
+            .and_then(|(_, r)| r.split_once(']'))
+            .map_or("", |(s, _)| s);
+        let mut words = inside.split_whitespace();
+        let sort = Sort::parse(words.next().unwrap_or(""));
+        View { inbox, sort, closed: inside.contains("+closed") }
     }
 }
