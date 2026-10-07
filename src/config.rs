@@ -3,6 +3,10 @@
 //! Option names and defaults follow fzfkasten.nvim's `setup()`. To use one
 //! collection from both tools, give both the same values. config.example.toml
 //! shows every option (`ttykasten config-example` prints it).
+//!
+//! A setting ttykasten does not know is reported and ignored rather than
+//! refused: the config file may come from a newer ttykasten (synced with
+//! dotfiles, say) than the binary reading it, and a typo still shows up.
 
 use std::env;
 use std::fs;
@@ -16,7 +20,7 @@ use crate::i18n::Language;
 pub const EXAMPLE: &str = include_str!("../config.example.toml");
 
 #[derive(Debug, Deserialize)]
-#[serde(default, deny_unknown_fields)]
+#[serde(default)]
 pub struct Config {
     /// Language of messages. Does not affect date names written into notes (`%A` etc.).
     pub language: Language,
@@ -65,14 +69,14 @@ impl Default for Config {
 }
 
 #[derive(Debug, Default, Deserialize)]
-#[serde(default, deny_unknown_fields)]
+#[serde(default)]
 pub struct Notes {
     pub daily: Daily,
     pub weekly: Weekly,
 }
 
 #[derive(Debug, Deserialize)]
-#[serde(default, deny_unknown_fields)]
+#[serde(default)]
 pub struct Daily {
     pub dir: String,
     pub format: String,
@@ -92,7 +96,7 @@ impl Default for Daily {
 }
 
 #[derive(Debug, Deserialize)]
-#[serde(default, deny_unknown_fields)]
+#[serde(default)]
 pub struct Weekly {
     pub dir: String,
     pub format: String,
@@ -112,7 +116,7 @@ impl Default for Weekly {
 }
 
 #[derive(Debug, Deserialize)]
-#[serde(default, deny_unknown_fields)]
+#[serde(default)]
 pub struct Tasks {
     /// Tag added to captured tasks. Unset: none.
     pub require_tag: Option<String>,
@@ -142,7 +146,7 @@ pub struct Tasks {
 }
 
 #[derive(Debug, Deserialize)]
-#[serde(default, deny_unknown_fields)]
+#[serde(default)]
 pub struct TaskIgnore {
     /// A frontmatter key whose value false / no / off opts a note out.
     pub frontmatter_key: Option<String>,
@@ -193,7 +197,7 @@ impl Tasks {
 }
 
 #[derive(Debug, Deserialize)]
-#[serde(default, deny_unknown_fields)]
+#[serde(default)]
 pub struct BlockId {
     pub length: usize,
     pub alphabet: String,
@@ -222,7 +226,7 @@ impl Default for BlockId {
 
 /// Labels in the list of daily and weekly notes (`log`).
 #[derive(Debug, Deserialize)]
-#[serde(default, deny_unknown_fields)]
+#[serde(default)]
 pub struct Log {
     pub day_label: String,
     pub week_label: String,
@@ -238,7 +242,7 @@ impl Default for Log {
 }
 
 #[derive(Debug, Deserialize)]
-#[serde(default, deny_unknown_fields)]
+#[serde(default)]
 pub struct Fzf {
     /// The fzf executable.
     pub command: String,
@@ -260,14 +264,13 @@ impl Default for Fzf {
 }
 
 #[derive(Debug, Default, Deserialize)]
-#[serde(default, deny_unknown_fields)]
+#[serde(default)]
 pub struct Menu {
     /// Items to list. Unset: every action in the default order.
     pub items: Option<Vec<MenuItem>>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
-#[serde(deny_unknown_fields)]
 pub struct MenuItem {
     /// A ttykasten action (daily, weekly, capture, find, new, log, link,
     /// link-daily, backlinks).
@@ -312,14 +315,14 @@ impl Menu {
 }
 
 #[derive(Debug, Default, Deserialize)]
-#[serde(default, deny_unknown_fields)]
+#[serde(default)]
 pub struct Preview {
     pub colors: Colors,
 }
 
 /// Colours are SGR parameters (`1;34` is bold blue). An empty string means no colour.
 #[derive(Debug, Clone, Deserialize)]
-#[serde(default, deny_unknown_fields)]
+#[serde(default)]
 pub struct Colors {
     pub heading: String,
     pub tag: String,
@@ -364,20 +367,36 @@ pub fn path() -> Option<PathBuf> {
     Some(base.join("ttykasten").join("config.toml"))
 }
 
-/// Loads the config. A missing file gives the defaults.
+/// Loads the config. A missing file gives the defaults. Unknown settings are
+/// reported on stderr, in the config's language, and ignored.
 pub fn load() -> Result<Config> {
     let Some(path) = path() else {
         return Ok(Config::default());
     };
-    match fs::read_to_string(&path) {
-        Ok(text) => parse(&text).with_context(|| format!("{}", path.display())),
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(Config::default()),
-        Err(e) => Err(e).with_context(|| format!("{}", path.display())),
+    let text = match fs::read_to_string(&path) {
+        Ok(text) => text,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Config::default()),
+        Err(e) => return Err(e).with_context(|| format!("{}", path.display())),
+    };
+    let (cfg, unknown) = parse(&text).with_context(|| format!("{}", path.display()))?;
+    let msg = cfg.language.msgs();
+    for key in unknown {
+        eprintln!("ttykasten: {}", crate::i18n::fill(msg.unknown_setting, &[&path.display(), &key]));
     }
+    Ok(cfg)
 }
 
-pub fn parse(text: &str) -> Result<Config> {
-    Ok(toml::from_str(text)?)
+/// Parses a config, returning the settings it has that ttykasten does not
+/// know (as dotted paths, e.g. `tasks.date_pattern`).
+pub fn parse(text: &str) -> Result<(Config, Vec<String>)> {
+    let de = toml::Deserializer::parse(text)?;
+    let mut unknown = Vec::new();
+    let cfg = serde_ignored::deserialize(de, |path| {
+        // serde_ignored marks the inside of an Option with `?`; drop it.
+        let dotted = path.to_string();
+        unknown.push(dotted.split('.').filter(|s| *s != "?").collect::<Vec<_>>().join("."));
+    })?;
+    Ok((cfg, unknown))
 }
 
 impl Config {
@@ -422,13 +441,14 @@ mod tests {
 
     #[test]
     fn example_parses() {
-        let c = parse(EXAMPLE).unwrap();
+        let (c, unknown) = parse(EXAMPLE).unwrap();
+        assert!(unknown.is_empty(), "{unknown:?}");
         assert_eq!(c.notes.daily.dir, "daily");
     }
 
     #[test]
     fn empty_is_plugin_defaults() {
-        let c = parse("").unwrap();
+        let (c, _) = parse("").unwrap();
         assert_eq!(c.language, Language::En);
         assert_eq!(c.hdate_format, "%B %d, %Y");
         assert_eq!(c.notes.weekly.format, "%G-W%V");
@@ -438,7 +458,7 @@ mod tests {
 
     #[test]
     fn partial_tables_keep_defaults() {
-        let c = parse(
+        let (c, _) = parse(
             r#"
             language = "ja"
             [notes.daily]
@@ -459,9 +479,14 @@ mod tests {
     }
 
     #[test]
-    fn typos_are_errors() {
-        assert!(parse("languge = \"ja\"").is_err());
+    fn unknown_settings_are_reported_not_refused() {
+        let (c, unknown) = parse("languge = \"ja\"\n[notes.daily]\ndri = \"x\"\ndir = \"j\"").unwrap();
+        assert_eq!(unknown, vec!["languge", "notes.daily.dri"]);
+        assert_eq!(c.notes.daily.dir, "j");
+        let (_, unknown) = parse("[[menu.items]]\naction = \"daily\"\nhotkey = \"x\"").unwrap();
+        assert_eq!(unknown, vec!["menu.items.0.hotkey"]);
+        // A wrong value is still an error.
         assert!(parse("language = \"fr\"").is_err());
-        assert!(parse("[notes.daily]\ndri = \"x\"").is_err());
+        assert!(parse("[block_id]\nlength = \"six\"").is_err());
     }
 }

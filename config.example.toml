@@ -4,7 +4,8 @@
 # It is read on every start, so edits take effect at once (no rebuild).
 # Anything left out takes the default shown here. The defaults are
 # fzfkasten.nvim's, so to use one collection from both tools, write the same
-# values as in your Neovim setup(). Unknown keys are errors, so typos show up.
+# values as in your Neovim setup(). An unknown key is reported (so typos show
+# up) and ignored, so a config newer than the binary still loads.
 
 # Language of messages: "en" or "ja". Day and month names written into notes
 # (%A, %B) are always English.

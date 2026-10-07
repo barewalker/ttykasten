@@ -54,6 +54,7 @@ pub struct Msgs {
     pub no_backlinks: &'static str,
     pub linked_into: &'static str,
     pub bad_pattern: &'static str,
+    pub unknown_setting: &'static str,
 }
 
 const EN: Msgs = Msgs {
@@ -119,6 +120,7 @@ Config: $TTYKASTEN_CONFIG, else $XDG_CONFIG_HOME/ttykasten/config.toml.
     no_backlinks: "nothing links to {}",
     linked_into: "{} -> {}:{}",
     bad_pattern: "bad regex in {}: {}",
+    unknown_setting: "{}: unknown setting `{}` ignored (a typo, or a config newer than this ttykasten)",
 };
 
 const JA: Msgs = Msgs {
@@ -184,6 +186,7 @@ const JA: Msgs = Msgs {
     no_backlinks: "{} へのリンクは無い",
     linked_into: "{} -> {}:{}",
     bad_pattern: "{} の正規表現が不正: {}",
+    unknown_setting: "{}: 知らない設定 `{}` を無視した (綴りの誤りか、設定がこの ttykasten より新しい)",
 };
 
 impl Language {
