@@ -35,6 +35,9 @@ pub enum Undo {
     Nothing,
     /// The line (or the note) has changed since; the entry is dropped.
     Changed(Entry),
+    /// The note can't be written now (open with unsaved changes elsewhere);
+    /// the entry is kept for a later try.
+    Blocked(Entry),
     Undone(Entry),
 }
 
@@ -83,13 +86,17 @@ impl Journal {
         self.save(&entries[skip..])
     }
 
-    /// Takes back the newest write made in `home`.
-    pub fn undo(&self, home: &Path) -> io::Result<Undo> {
+    /// Takes back the newest write made in `home`. `blocked` says whether a
+    /// note must not be written right now.
+    pub fn undo(&self, home: &Path, blocked: impl Fn(&Path) -> bool) -> io::Result<Undo> {
         let home_s = home.to_string_lossy();
         let mut entries = self.load();
         let Some(i) = entries.iter().rposition(|e| e.home == home_s) else {
             return Ok(Undo::Nothing);
         };
+        if blocked(&home.join(&entries[i].rel)) {
+            return Ok(Undo::Blocked(entries[i].clone()));
+        }
         let entry = entries.remove(i);
         let path = home.join(&entry.rel);
         let mut lines = match fileio::read_lines(&path) {
@@ -143,12 +150,14 @@ mod tests {
         // Another collection's entry is not touched.
         j.record(Entry { home: "/elsewhere".into(), ..entry(1, Some("x"), "y") }).unwrap();
 
-        assert!(matches!(j.undo(&home).unwrap(), Undo::Undone(_)));
+        // A blocked note keeps its entry for later.
+        assert!(matches!(j.undo(&home, |_| true).unwrap(), Undo::Blocked(_)));
+        assert!(matches!(j.undo(&home, |_| false).unwrap(), Undo::Undone(_)));
         assert_eq!(fs::read_to_string(&note).unwrap(), "- [x] a\n- [ ] b\n");
         // The line was edited since: refused, and the entry dropped.
         fs::write(&note, "- [x] a edited\n- [ ] b\n").unwrap();
-        assert!(matches!(j.undo(&home).unwrap(), Undo::Changed(_)));
-        assert_eq!(j.undo(&home).unwrap(), Undo::Nothing);
+        assert!(matches!(j.undo(&home, |_| false).unwrap(), Undo::Changed(_)));
+        assert_eq!(j.undo(&home, |_| false).unwrap(), Undo::Nothing);
         assert_eq!(j.load().len(), 1);
 
         for i in 0..60 {

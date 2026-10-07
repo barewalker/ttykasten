@@ -151,3 +151,15 @@ on every start, so changes need no rebuild.
 - Checked byte for byte against the plugin's toggle_at, cancel_at, due_at,
   tag_at, add (guided capture), TaskTag and BlockIds under nvim --headless.
 
+2026-10-07 (later): no writing under an unsaved Neovim buffer.
+
+- The plugin refuses to write a file whose buffer has unsaved changes in
+  its own Neovim; ttykasten cannot see Neovim's buffers, so it reads the
+  swap file instead (Vim's block 0: the pid at bytes 24..28, `U` at byte
+  1007 while the buffer is modified, cleared on `:w`). Before every write
+  of a note, a swap file for it whose process is alive and whose buffer is
+  modified makes ttykasten refuse. In the task list the reason shows in the
+  header; undo keeps the entry so it can be retried after saving.
+- `nvim_swap_dir` overrides the location; "" turns the check off.
+- Verified with a real Neovim: refused while unsaved, written after `:w`.
+

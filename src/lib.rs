@@ -10,6 +10,7 @@ pub mod i18n;
 pub mod journal;
 pub mod link;
 pub mod note;
+pub mod nvimswap;
 pub mod preview;
 pub mod task;
 pub mod tasks;

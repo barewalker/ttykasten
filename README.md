@@ -65,6 +65,10 @@ cancelled tasks. All keys are configurable (`[tasks.keys]`). An action
 refuses when the line changed after the list was drawn, and every write is
 kept in an undo journal outside the collection.
 
+ttykasten writes note files directly. Before each write it reads Neovim's
+swap file for that note and refuses if the note is open in a running Neovim
+with unsaved changes, so neither side's edits are lost (`nvim_swap_dir`).
+
 Links point at a line, not only at a note: `[[note#^id]]` finds its line
 wherever it moves, because the id travels with the line. `link` copies the
 link through the terminal (OSC 52) by default, so it works over ssh and mosh;

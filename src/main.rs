@@ -20,7 +20,7 @@ use ttykasten::i18n::{Msgs, fill};
 use ttykasten::note::{self, Periodic};
 use ttykasten::journal::{Entry, Journal, Undo};
 use ttykasten::tasks::{self, Scanner, Sort, Want};
-use ttykasten::{blockid, fileio, link, preview, task, template, trim};
+use ttykasten::{blockid, fileio, link, nvimswap, preview, task, template, trim};
 
 fn main() -> ExitCode {
     match run() {
@@ -208,6 +208,7 @@ impl App {
                 Some(t) => template::load(&self.home, &self.cfg.hdate_format, t, &title, now()),
                 None => format!("# {title}"),
             };
+            self.guard(&path)?;
             fileio::write_text(&path, &content)
                 .with_context(|| fill(self.msg.cannot_write, &[&path.display()]))?;
         }
@@ -240,6 +241,7 @@ impl App {
                 &kind.name(cfg, t),
                 t,
             );
+            self.guard(&path)?;
             fileio::write_text(&path, &content)
                 .with_context(|| fill(self.msg.cannot_write, &[&path.display()]))?;
         }
@@ -559,6 +561,9 @@ impl App {
         rewrite: impl FnOnce(&str) -> Result<String, task::Refusal>,
     ) -> Result<Result<String, String>> {
         let path = self.home.join(rel);
+        if let Some(why) = self.blocked(&path) {
+            return Ok(Err(why));
+        }
         let mut lines = fileio::read_lines(&path)?;
         let Some(line) = lines.get(lineno.wrapping_sub(1)).cloned() else {
             return Ok(Err(fill(self.msg.line_changed, &[&rel])));
@@ -680,6 +685,7 @@ impl App {
     /// Appends a task to the capture note and records it for undo.
     fn capture_text(&self, rel: &str, text: &str, due: Option<&str>) -> Result<Option<String>> {
         let path = self.home.join(rel);
+        self.guard(&path)?;
         match task::capture(&self.cfg, &path, text, due).with_context(|| fill(self.msg.cannot_write, &[&path.display()]))? {
             Some((line, lineno)) => {
                 self.remember(rel, lineno, None, &line);
@@ -759,6 +765,7 @@ impl App {
             if changed.is_empty() {
                 continue;
             }
+            self.guard(&path)?;
             fileio::write_lines(&path, &lines).with_context(|| fill(self.msg.cannot_write, &[&path.display()]))?;
             for (idx, before, after) in changed {
                 self.remember(&rel, idx + 1, Some(before), &after);
@@ -809,6 +816,7 @@ impl App {
             }
         }
         if !changed.is_empty() {
+            self.guard(&path)?;
             fileio::write_lines(&path, &lines).with_context(|| fill(self.msg.cannot_write, &[&path.display()]))?;
             for (i, before, after) in &changed {
                 self.remember(&rel, i + 1, Some(before.clone()), after);
@@ -816,6 +824,23 @@ impl App {
         }
         println!("{}", fill(self.msg.minted_n, &[&changed.len()]));
         Ok(())
+    }
+
+    /// Why `path` must not be written now: it is open in a running Neovim
+    /// with unsaved changes. Writing would lose one side's edits on `:w`.
+    fn blocked(&self, path: &Path) -> Option<String> {
+        let dir = self.cfg.swap_dir()?;
+        let pid = nvimswap::unsaved_pid(&dir, path)?;
+        let rel = path.strip_prefix(&self.home).unwrap_or(path);
+        Some(fill(self.msg.unsaved_in_nvim, &[&rel.display(), &pid]))
+    }
+
+    /// Fails with the reason when `path` must not be written now.
+    fn guard(&self, path: &Path) -> Result<()> {
+        match self.blocked(path) {
+            Some(why) => bail!(why),
+            None => Ok(()),
+        }
     }
 
     fn journal(&self) -> Option<Journal> {
@@ -844,8 +869,9 @@ impl App {
         let Some(j) = self.journal() else {
             return Ok(self.msg.undo_nothing.to_string());
         };
-        Ok(match j.undo(&self.home)? {
+        Ok(match j.undo(&self.home, |p| self.blocked(p).is_some())? {
             Undo::Nothing => self.msg.undo_nothing.to_string(),
+            Undo::Blocked(e) => self.blocked(&self.home.join(&e.rel)).unwrap_or_default(),
             Undo::Changed(e) => fill(self.msg.undo_changed, &[&e.rel, &e.lineno]),
             Undo::Undone(e) => fill(self.msg.undone, &[&e.rel, &e.lineno]),
         })
@@ -959,6 +985,7 @@ impl App {
             bail!(self.msg.blank_line);
         };
         if let Some(new_line) = made.new_line {
+            self.guard(&path)?;
             lines[idx] = new_line;
             fileio::write_lines(&path, &lines)
                 .with_context(|| fill(self.msg.cannot_write, &[&path.display()]))?;
@@ -994,6 +1021,7 @@ impl App {
                 .collect()
         };
         lines.push(format!("{}{link}", cfg.block_id.daily_bullet));
+        self.guard(&path)?;
         fileio::write_lines(&path, &lines)
             .with_context(|| fill(self.msg.cannot_write, &[&path.display()]))?;
         println!("{}", fill(self.msg.linked_into, &[&link, &rel, &lines.len()]));

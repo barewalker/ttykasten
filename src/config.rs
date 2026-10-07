@@ -34,6 +34,11 @@ pub struct Config {
     /// The editor argument that opens a file at a line; `{line}` is replaced.
     /// Empty: files open at the top.
     pub editor_line: String,
+    /// Neovim's swap directory, read before every write so that a note open
+    /// in Neovim with unsaved changes is not written under it. Unset: Neovim's
+    /// default ($XDG_STATE_HOME/nvim/swap, else ~/.local/state/nvim/swap).
+    /// Empty: no check.
+    pub nvim_swap_dir: Option<String>,
     /// Where a link goes: "osc52" (the terminal's clipboard, also over ssh and
     /// mosh), "none", or a command that reads the link on stdin (e.g. "wl-copy").
     pub clipboard: String,
@@ -56,6 +61,7 @@ impl Default for Config {
             new_note_template: None,
             editor: None,
             editor_line: "+{line}".into(),
+            nvim_swap_dir: None,
             clipboard: "osc52".into(),
             notes: Notes::default(),
             tasks: Tasks::default(),
@@ -452,6 +458,19 @@ impl Config {
             return Ok(PathBuf::from(h));
         }
         expand_tilde("~/notes")
+    }
+
+    /// The swap directory to check, or None when checking is off.
+    pub fn swap_dir(&self) -> Option<PathBuf> {
+        match self.nvim_swap_dir.as_deref() {
+            Some("") => None,
+            Some(dir) => expand_tilde(dir).ok(),
+            None => env::var_os("XDG_STATE_HOME")
+                .filter(|p| !p.is_empty())
+                .map(PathBuf::from)
+                .or_else(|| env::var_os("HOME").map(|h| PathBuf::from(h).join(".local/state")))
+                .map(|base| base.join("nvim").join("swap")),
+        }
     }
 
     /// The editor command.

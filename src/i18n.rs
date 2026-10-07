@@ -80,6 +80,7 @@ pub struct Msgs {
     pub desc_mint_ids: &'static str,
     pub desc_undo: &'static str,
     pub prompt_note: &'static str,
+    pub unsaved_in_nvim: &'static str,
 }
 
 const EN: Msgs = Msgs {
@@ -177,6 +178,7 @@ Config: $TTYKASTEN_CONFIG, else $XDG_CONFIG_HOME/ttykasten/config.toml.
     desc_mint_ids: "Give every tagged task in a note an id",
     desc_undo: "Undo the last task edit",
     prompt_note: "note> ",
+    unsaved_in_nvim: "{} has unsaved changes in Neovim (pid {}); save it there first",
 };
 
 const JA: Msgs = Msgs {
@@ -274,6 +276,7 @@ const JA: Msgs = Msgs {
     desc_mint_ids: "ノートのタスクに id を付ける",
     desc_undo: "直前のタスクの書き換えを戻す",
     prompt_note: "note> ",
+    unsaved_in_nvim: "{} は Neovim で未保存の変更がある (pid {})。先に Neovim で保存してほしい",
 };
 
 impl Language {

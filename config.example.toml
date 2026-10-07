@@ -30,6 +30,13 @@ hdate_format = "%B %d, %Y"
 # `backlinks`. "" opens files at the top.
 editor_line = "+{line}"
 
+# Neovim's swap directory. Before writing a note, ttykasten reads its swap
+# file there and refuses when the note is open in a running Neovim with
+# unsaved changes (writing would lose one side's edits on :w). Unset:
+# Neovim's default, $XDG_STATE_HOME/nvim/swap or ~/.local/state/nvim/swap.
+# "" turns the check off.
+# nvim_swap_dir = "~/.local/state/nvim/swap"
+
 # Where `link` and `link-daily` copy the link: "osc52" (the terminal's
 # clipboard; also works over ssh and mosh, and in tmux with set-clipboard on),
 # "none", or a command that reads the link on stdin, e.g. "wl-copy".
