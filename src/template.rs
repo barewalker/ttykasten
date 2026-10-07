@@ -6,18 +6,22 @@ use chrono::NaiveDateTime;
 
 use crate::fileio;
 
+/// Values for keys beyond the built-in ones (`agenda`, `agenda_week`), asked
+/// only when a template names them.
+pub type Extra<'a> = &'a dyn Fn(&str) -> Option<String>;
+
 /// `load_template(rel_path, title, time)`. An unreadable template gives
 /// `"# " .. title`. The result has no trailing newline.
-pub fn load(home: &Path, hdate: &str, rel: &str, title: &str, time: NaiveDateTime) -> String {
+pub fn load(home: &Path, hdate: &str, rel: &str, title: &str, time: NaiveDateTime, extra: Extra) -> String {
     let rest = rel.strip_prefix("templates/").unwrap_or(rel);
     let path = home.join("templates").join(rest);
     match fileio::read_lines(&path) {
-        Ok(lines) => substitute(&lines.join("\n"), hdate, title, time),
+        Ok(lines) => substitute(&lines.join("\n"), hdate, title, time, extra),
         Err(_) => format!("# {title}"),
     }
 }
 
-fn value(key: &str, hdate: &str, title: &str, time: NaiveDateTime) -> Option<String> {
+fn value(key: &str, hdate: &str, title: &str, time: NaiveDateTime, extra: Extra) -> Option<String> {
     let f = |fmt: &str| time.format(fmt).to_string();
     Some(match key {
         "title" => title.to_string(),
@@ -29,15 +33,14 @@ fn value(key: &str, hdate: &str, title: &str, time: NaiveDateTime) -> Option<Str
         "day" => f("%d"),
         "week" => f("%V"),
         "time" => f("%H:%M"),
-        // agenda / agenda_week need a calendar (gcalcli). Not supported yet, so
-        // they are left intact like unknown keys.
-        _ => return None,
+        // agenda / agenda_week come from the calendar, through `extra`.
+        _ => return extra(key),
     })
 }
 
 /// Substitutes the way Lua's `gsub("{{(.-)}}", …)` does. Keys match lazily
 /// and are not trimmed. Unknown keys are left intact, braces and all.
-pub fn substitute(text: &str, hdate: &str, title: &str, time: NaiveDateTime) -> String {
+pub fn substitute(text: &str, hdate: &str, title: &str, time: NaiveDateTime, extra: Extra) -> String {
     let mut out = String::with_capacity(text.len());
     let mut rest = text;
     while let Some(open) = rest.find("{{") {
@@ -47,7 +50,7 @@ pub fn substitute(text: &str, hdate: &str, title: &str, time: NaiveDateTime) -> 
         let key = &rest[open + 2..open + 2 + close];
         let end = open + 2 + close + 2;
         out.push_str(&rest[..open]);
-        match value(key, hdate, title, time) {
+        match value(key, hdate, title, time, extra) {
             Some(v) => out.push_str(&v),
             None => out.push_str(&rest[open..end]),
         }
@@ -72,7 +75,7 @@ mod tests {
     }
 
     fn sub(s: &str) -> String {
-        substitute(s, HDATE, "T", t())
+        substitute(s, HDATE, "T", t(), &|_| None)
     }
 
     #[test]
@@ -81,6 +84,8 @@ mod tests {
         assert_eq!(sub("{{date}} {{time}}"), "2026-09-29 08:10");
         assert_eq!(sub("{{year}}-W{{week}}"), "2026-W40");
         assert_eq!(sub("{{title}}"), "T");
+        let agenda = |k: &str| (k == "agenda").then(|| "- 09:00  standup".to_string());
+        assert_eq!(substitute("{{agenda}}|{{agenda_week}}", HDATE, "", t(), &agenda), "- 09:00  standup|{{agenda_week}}");
     }
 
     #[test]
@@ -90,7 +95,7 @@ mod tests {
             .and_hms_opt(12, 0, 0)
             .unwrap();
         assert_eq!(
-            substitute("{{isoyear}}-W{{week}} {{year}}", HDATE, "", d),
+            substitute("{{isoyear}}-W{{week}} {{year}}", HDATE, "", d, &|_| None),
             "2026-W01 2025"
         );
     }
@@ -102,7 +107,7 @@ mod tests {
             .and_hms_opt(12, 0, 0)
             .unwrap();
         assert_eq!(
-            substitute("{{hdate}}", HDATE, "", d),
+            substitute("{{hdate}}", HDATE, "", d, &|_| None),
             "Tuesday, September 01, 2026"
         );
     }
@@ -115,6 +120,6 @@ mod tests {
         assert_eq!(sub("{{{{title}}}}"), "{{{{title}}}}");
         assert_eq!(sub("{{title"), "{{title");
         // A % or {{ inside a value is inserted as is.
-        assert_eq!(substitute("{{title}}", HDATE, "%1 {{date}}", t()), "%1 {{date}}");
+        assert_eq!(substitute("{{title}}", HDATE, "%1 {{date}}", t(), &|_| None), "%1 {{date}}");
     }
 }

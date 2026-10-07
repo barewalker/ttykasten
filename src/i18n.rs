@@ -81,6 +81,10 @@ pub struct Msgs {
     pub desc_undo: &'static str,
     pub prompt_note: &'static str,
     pub unsaved_in_nvim: &'static str,
+    pub desc_week: &'static str,
+    pub desc_digest: &'static str,
+    pub week_header: &'static str,
+    pub no_notes_in_week: &'static str,
 }
 
 const EN: Msgs = Msgs {
@@ -99,6 +103,8 @@ Usage: ttykasten [ACTION] [ARG…]
   tag             pick lines (tab marks several) and turn them into tasks
   mint-ids        pick a note and give each tagged task in it an id
   undo            undo the last task edit (kept across runs)
+  week [WEEK]     notes dated in a week (ctrl-d: its digest); WEEK is -1, 2026-W37 or a date
+  digest [WEEK]   the week digest: notes, calendar, finished and open tasks, what's due next
   find            find a note and open it
   new [TITLE]     create a note from the template
   log             list daily and weekly notes (ctrl-x: pick a date)
@@ -179,6 +185,10 @@ Config: $TTYKASTEN_CONFIG, else $XDG_CONFIG_HOME/ttykasten/config.toml.
     desc_undo: "Undo the last task edit",
     prompt_note: "note> ",
     unsaved_in_nvim: "{} has unsaved changes in Neovim (pid {}); save it there first",
+    desc_week: "This week's notes (ctrl-d: digest)",
+    desc_digest: "Week digest",
+    week_header: "{} to {} · ctrl-d digest",
+    no_notes_in_week: "no notes dated {} ({} to {})",
 };
 
 const JA: Msgs = Msgs {
@@ -197,6 +207,8 @@ const JA: Msgs = Msgs {
   tag             行を選んで (tab で複数) タスクにする
   mint-ids        ノートを選び、タグの付いたタスクに id を付ける
   undo            直前のタスクの書き換えを戻す (起動をまたいで残る)
+  week [週]       その週の日付のノート (ctrl-d で週まとめ)。週は -1, 2026-W37, 日付
+  digest [週]     週まとめ: ノート、予定、終えたタスクと残るタスク、翌週の期日
   find            ノートを探して開く
   new [題名]      雛形から新しいノートを作る
   log             日誌と週まとめの一覧 (ctrl-x で日付を指定)
@@ -277,6 +289,10 @@ const JA: Msgs = Msgs {
     desc_undo: "直前のタスクの書き換えを戻す",
     prompt_note: "note> ",
     unsaved_in_nvim: "{} は Neovim で未保存の変更がある (pid {})。先に Neovim で保存してほしい",
+    desc_week: "今週のノート (ctrl-d で週まとめ)",
+    desc_digest: "週まとめ",
+    week_header: "{} 〜 {} · ctrl-d 週まとめ",
+    no_notes_in_week: "{} ({} 〜 {}) の日付のノートは無い",
 };
 
 impl Language {
@@ -307,6 +323,8 @@ impl Msgs {
             "tag" => self.desc_tag,
             "mint-ids" => self.desc_mint_ids,
             "undo" => self.desc_undo,
+            "week" => self.desc_week,
+            "digest" => self.desc_digest,
             _ => return None,
         })
     }

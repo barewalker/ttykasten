@@ -8,7 +8,7 @@
 use std::collections::HashMap;
 use std::env;
 use std::fs;
-use std::io::Write;
+use std::io::{IsTerminal, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode, Stdio};
 
@@ -20,7 +20,7 @@ use ttykasten::i18n::{Msgs, fill};
 use ttykasten::note::{self, Periodic};
 use ttykasten::journal::{Entry, Journal, Undo};
 use ttykasten::tasks::{self, Scanner, Sort, Want};
-use ttykasten::{blockid, fileio, link, nvimswap, preview, task, template, trim};
+use ttykasten::{blockid, calendar, fileio, link, nvimswap, preview, task, template, trim, week};
 
 fn main() -> ExitCode {
     match run() {
@@ -105,6 +105,8 @@ impl App {
                 println!("{}", self.undo_message()?);
                 Ok(())
             }
+            "week" => self.week(arg.as_deref().unwrap_or("")),
+            "digest" => self.digest(arg.as_deref().unwrap_or("")),
             "link" => self.link(),
             "link-daily" => self.link_daily(),
             "backlinks" => self.backlinks(),
@@ -205,7 +207,10 @@ impl App {
             eprintln!("ttykasten: {}", fill(self.msg.opening_existing, &[&path.display()]));
         } else {
             let content = match &self.cfg.new_note_template {
-                Some(t) => template::load(&self.home, &self.cfg.hdate_format, t, &title, now()),
+                Some(t) => {
+                    let now = now();
+                    template::load(&self.home, &self.cfg.hdate_format, t, &title, now, &|k| self.agenda(k, now))
+                }
                 None => format!("# {title}"),
             };
             self.guard(&path)?;
@@ -240,6 +245,7 @@ impl App {
                 kind.template(cfg),
                 &kind.name(cfg, t),
                 t,
+                &|k| self.agenda(k, t),
             );
             self.guard(&path)?;
             fileio::write_text(&path, &content)
@@ -826,6 +832,185 @@ impl App {
         Ok(())
     }
 
+    /// `{{agenda}}` and `{{agenda_week}}` for a template filled at `time`.
+    fn agenda(&self, key: &str, time: NaiveDateTime) -> Option<String> {
+        let cal = &self.cfg.calendar;
+        match key {
+            "agenda" => Some(calendar::day_lines(cal, time.date()).join("\n")),
+            "agenda_week" => {
+                let r = week::range("", time.date()).ok()?;
+                Some(calendar::range_lines(cal, &r.from, &r.to).0.join("\n"))
+            }
+            _ => None,
+        }
+    }
+
+    fn week_range(&self, spec: &str) -> Result<week::Range> {
+        week::range(spec, now().date()).map_err(|e| anyhow!(e))
+    }
+
+    /// The notes dated within a week (§11): the finder's notes, less ignored
+    /// dirs and patterns and the week's own weekly note, by date then path.
+    fn week_notes(&self, range: &week::Range) -> Result<Vec<week::WeekNote>> {
+        let w = &self.cfg.week;
+        let patterns = w
+            .ignore_patterns
+            .iter()
+            .map(|p| regex::Regex::new(p))
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| anyhow!(fill(self.msg.bad_pattern, &[&"week.ignore_patterns", &e])))?;
+        let scanner = Scanner::new(&self.cfg)
+            .map_err(|e| anyhow!(fill(self.msg.bad_pattern, &[&"tasks.date_patterns", &e])))?;
+        let monday = range.monday.and_hms_opt(12, 0, 0).context("monday")?;
+        let weekly = Periodic::Weekly.rel(&self.cfg, monday);
+        let mut notes = Vec::new();
+        for rel in self.note_files("--no-ignore-vcs")? {
+            let in_dir = w.ignore_dirs.iter().any(|d| rel == *d || rel.strip_prefix(d.as_str()).is_some_and(|r| r.starts_with('/')));
+            if in_dir || patterns.iter().any(|p| p.is_match(&rel)) || rel == weekly {
+                continue;
+            }
+            let Ok(lines) = fileio::read_lines(&self.home.join(&rel)) else {
+                continue;
+            };
+            if let Some(date) = scanner.date_of(&rel, &lines)
+                && date >= range.from
+                && date <= range.to
+            {
+                let name = link::note_name(Path::new(&rel));
+                notes.push(week::WeekNote { rel, date, name, lines });
+            }
+        }
+        notes.sort_by(|a, b| a.date.cmp(&b.date).then(a.rel.cmp(&b.rel)));
+        Ok(notes)
+    }
+
+    /// The notes of a week in fzf; enter opens one, ctrl-d shows the digest.
+    fn week(&self, spec: &str) -> Result<()> {
+        let range = self.week_range(spec)?;
+        let notes = self.week_notes(&range)?;
+        if notes.is_empty() {
+            eprintln!("ttykasten: {}", fill(self.msg.no_notes_in_week, &[&range.label, &range.from, &range.to]));
+            return Ok(());
+        }
+        let ext = format!(".{}", self.cfg.extension);
+        let items: String = notes
+            .iter()
+            .map(|n| format!("{}\t{}  {}\n", n.rel, week::day_label(&n.date), n.rel.strip_suffix(&ext).unwrap_or(&n.rel)))
+            .collect();
+        let mut args = vec![
+            "--delimiter=\t".to_string(),
+            "--with-nth=2..".into(),
+            "--no-sort".into(),
+            "--expect=ctrl-d".into(),
+            format!("--prompt={}> ", range.label),
+            format!("--header={}", fill(self.msg.week_header, &[&range.from, &range.to])),
+        ];
+        args.extend(self.preview_arg("{1}")?);
+        let args: Vec<&str> = args.iter().map(String::as_str).collect();
+        let Some(out) = self.fzf(&items, &args)? else {
+            return Ok(());
+        };
+        if out.first().map(String::as_str) == Some("ctrl-d") {
+            return self.digest(&range.from);
+        }
+        match out.get(1).and_then(|l| l.split('\t').next()) {
+            Some(rel) if !rel.is_empty() => self.edit(&self.home.join(rel)),
+            _ => Ok(()),
+        }
+    }
+
+    /// The week digest (§11), coloured in the pager on a terminal, plain
+    /// Markdown otherwise.
+    fn digest(&self, spec: &str) -> Result<()> {
+        let lines = self.digest_lines(spec)?;
+        let pager = self.cfg.pager.trim();
+        if pager.is_empty() || !std::io::stdout().is_terminal() {
+            let mut out = std::io::stdout().lock();
+            for l in &lines {
+                let _ = writeln!(out, "{l}");
+            }
+            return Ok(());
+        }
+        let coloured = preview::render(&lines, &self.cfg.preview.colors, None);
+        let mut child = Command::new("sh")
+            .arg("-c")
+            .arg(pager)
+            .stdin(Stdio::piped())
+            .spawn()
+            .with_context(|| fill(self.msg.cannot_start, &[&pager]))?;
+        if let Some(mut w) = child.stdin.take() {
+            let _ = w.write_all(coloured.as_bytes());
+        }
+        let _ = child.wait();
+        Ok(())
+    }
+
+    fn digest_lines(&self, spec: &str) -> Result<Vec<String>> {
+        let range = self.week_range(spec)?;
+        let notes = self.week_notes(&range)?;
+        let d = &self.cfg.week.digest;
+        let tasks = if d.tasks {
+            let scanner = Scanner::new(&self.cfg)
+                .map_err(|e| anyhow!(fill(self.msg.bad_pattern, &[&"tasks.date_patterns / tasks.headings", &e])))?;
+            let mut all = Vec::new();
+            for rel in self.checkbox_notes()? {
+                if let Ok(lines) = fileio::read_lines(&self.home.join(&rel)) {
+                    scanner.scan_note(&rel, &lines, None, &mut all);
+                }
+            }
+            tasks::select(all, Want { inbox: false, done: true, cancelled: false }, Sort::Added)
+        } else {
+            Vec::new()
+        };
+        let ahead = (d.ahead > 0).then(|| week::ahead_of(&range, d.ahead));
+        let sources = d
+            .sources
+            .iter()
+            .map(|s| {
+                let cmd = s
+                    .command
+                    .replace("{from}", &range.from)
+                    .replace("{to}", &range.to)
+                    .replace("{ahead_from}", ahead.as_ref().map_or("", |a| a.from.as_str()))
+                    .replace("{ahead_to}", ahead.as_ref().map_or("", |a| a.to.as_str()));
+                (s.label.clone(), self.source_lines(&cmd))
+            })
+            .collect();
+        let cal = &self.cfg.calendar;
+        let extras = week::Extras {
+            calendar: cal
+                .enabled
+                .then(|| Box::new(move |from: &str, to: &str| calendar::range_lines(cal, from, to)) as week::CalendarFn),
+            sources,
+        };
+        let monday = range.monday.and_hms_opt(12, 0, 0).context("monday")?;
+        let weekly_name = Periodic::Weekly.name(&self.cfg, monday);
+        Ok(week::digest_lines(d, &range, &weekly_name, &notes, &tasks, &extras))
+    }
+
+    /// A digest source's output, trailing blank lines dropped, or an
+    /// `(unavailable: …)` line when the command fails.
+    fn source_lines(&self, command: &str) -> Vec<String> {
+        let unavailable = &self.cfg.week.digest.labels.unavailable;
+        let out = Command::new("sh").arg("-c").arg(command).current_dir(&self.home).stdin(Stdio::null()).output();
+        match out {
+            Ok(o) if o.status.success() => {
+                let mut lines: Vec<String> = String::from_utf8_lossy(&o.stdout).lines().map(str::to_string).collect();
+                while lines.last().is_some_and(|l| trim(l).is_empty()) {
+                    lines.pop();
+                }
+                lines
+            }
+            Ok(o) => {
+                let err = String::from_utf8_lossy(&o.stderr);
+                let first = err.lines().next().unwrap_or("").to_string();
+                let code = o.status.code().unwrap_or(-1);
+                vec![format!("({unavailable}: exited {code}{})", if first.is_empty() { String::new() } else { format!(": {first}") })]
+            }
+            Err(e) => vec![format!("({unavailable}: {e})")],
+        }
+    }
+
     /// Why `path` must not be written now: it is open in a running Neovim
     /// with unsaved changes. Writing would lose one side's edits on `:w`.
     fn blocked(&self, path: &Path) -> Option<String> {
@@ -1015,7 +1200,9 @@ impl App {
             fileio::read_lines(&path)?
         } else {
             fs::create_dir_all(self.home.join(kind.dir(cfg)))?;
-            template::load(&self.home, &cfg.hdate_format, kind.template(cfg), &kind.name(cfg, now), now)
+            template::load(&self.home, &cfg.hdate_format, kind.template(cfg), &kind.name(cfg, now), now, &|k| {
+                self.agenda(k, now)
+            })
                 .split('\n')
                 .map(str::to_string)
                 .collect()

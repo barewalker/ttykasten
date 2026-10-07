@@ -4,6 +4,7 @@
 //! to it. Running fzf and the editor is left to main.rs.
 
 pub mod blockid;
+pub mod calendar;
 pub mod config;
 pub mod fileio;
 pub mod i18n;
@@ -15,6 +16,7 @@ pub mod preview;
 pub mod task;
 pub mod tasks;
 pub mod template;
+pub mod week;
 
 /// ASCII whitespace, Lua's `%s`. The ideographic space U+3000 is not included (§0.2).
 pub fn is_ws(b: u8) -> bool {

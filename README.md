@@ -17,8 +17,8 @@ ttykasten find          # find a note, with a coloured preview
 ttykasten link          # pick any line of any note; copy [[note#^id]]
 ```
 
-Status: an early prototype. The week digest and more search views are
-planned (see [docs/design.md](docs/design.md)).
+Status: an early prototype. More search views (romaji, full text, tags,
+recent notes, the link graph) are planned (see [docs/design.md](docs/design.md)).
 
 ## Requirements
 
@@ -46,6 +46,8 @@ cargo install --git https://github.com/barewalker/ttykasten
 | `tag` | pick lines (tab marks several) and turn them into tasks: `- [ ] … #todo` |
 | `mint-ids` | pick a note and give each tagged task in it a `^id` |
 | `undo` | undo the last task edit, even from an earlier run |
+| `week [WEEK]` | the notes dated in a week; `ctrl-d` shows its digest. `WEEK` is empty (this week), `-1`, `2026-W37` or a date |
+| `digest [WEEK]` | the week digest: each note's outline and opening lines, the calendar, tasks finished and still open, extra sources, and what is coming up next week |
 | `find` | find a note by path and open it |
 | `new [TITLE]` | create a note from the template and open it |
 | `log` | list recent daily and weekly notes; `ctrl-x` picks a date |
@@ -112,6 +114,15 @@ command = "git status; read -r _"
 
 `ttykasten config-example` prints every option with its default
 ([config.example.toml](config.example.toml)).
+
+## Calendar
+
+`{{agenda}}` and `{{agenda_week}}` in templates, and the digest's calendar
+sections, read events through
+[gcalcli](https://github.com/insanum/gcalcli) (or any command printing its
+TSV) when `[calendar] enabled = true`. Results are cached for 15 minutes,
+and when the command fails an older result is shown, marked with when it
+was fetched.
 
 ## Compatibility
 

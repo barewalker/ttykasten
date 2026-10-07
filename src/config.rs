@@ -49,6 +49,10 @@ pub struct Config {
     pub fzf: Fzf,
     pub menu: Menu,
     pub preview: Preview,
+    pub calendar: Calendar,
+    pub week: Week,
+    /// The pager for `digest` (gets coloured text); "" prints to stdout.
+    pub pager: String,
 }
 
 impl Default for Config {
@@ -70,6 +74,9 @@ impl Default for Config {
             fzf: Fzf::default(),
             menu: Menu::default(),
             preview: Preview::default(),
+            calendar: Calendar::default(),
+            week: Week::default(),
+            pager: "less -R".into(),
         }
     }
 }
@@ -335,6 +342,8 @@ pub const ACTIONS: &[&str] = &[
     "tag",
     "mint-ids",
     "undo",
+    "week",
+    "digest",
     "find",
     "new",
     "log",
@@ -356,6 +365,181 @@ impl Menu {
                     label: None,
                 })
                 .collect(),
+        }
+    }
+}
+
+/// The calendar (format.md §12), read through gcalcli or a command that
+/// prints the same TSV.
+#[derive(Debug, Deserialize)]
+#[serde(default)]
+pub struct Calendar {
+    pub enabled: bool,
+    /// The calendar(s) to read (`--calendar`); a string or a list.
+    pub name: Names,
+    pub gcalcli: String,
+    /// A shell command used instead of gcalcli; `{from}` and `{to}` (to is
+    /// exclusive) are replaced. It must print gcalcli's TSV.
+    pub command: Option<String>,
+    pub bullet: String,
+    /// Milliseconds to wait for the command.
+    pub timeout: u64,
+    pub cache: CalendarCache,
+    pub labels: CalendarLabels,
+}
+
+impl Default for Calendar {
+    fn default() -> Self {
+        Calendar {
+            enabled: false,
+            name: Names::default(),
+            gcalcli: "gcalcli".into(),
+            command: None,
+            bullet: "- ".into(),
+            timeout: 15000,
+            cache: CalendarCache::default(),
+            labels: CalendarLabels::default(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(untagged)]
+pub enum Names {
+    #[default]
+    None,
+    One(String),
+    Many(Vec<String>),
+}
+
+impl Names {
+    pub fn names(&self) -> Vec<&str> {
+        match self {
+            Names::None => Vec::new(),
+            Names::One(n) => vec![n.as_str()],
+            Names::Many(v) => v.iter().map(String::as_str).collect(),
+        }
+    }
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(default)]
+pub struct CalendarCache {
+    /// Seconds a fetched result is reused.
+    pub ttl: u64,
+    /// Unset: $XDG_CACHE_HOME/ttykasten/calendar.
+    pub dir: Option<String>,
+}
+
+impl Default for CalendarCache {
+    fn default() -> Self {
+        CalendarCache { ttl: 900, dir: None }
+    }
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(default)]
+pub struct CalendarLabels {
+    pub all_day: String,
+    pub unavailable: String,
+}
+
+impl Default for CalendarLabels {
+    fn default() -> Self {
+        CalendarLabels { all_day: "all day".into(), unavailable: "calendar unavailable".into() }
+    }
+}
+
+/// Week views and the week digest (format.md §11).
+#[derive(Debug, Deserialize)]
+#[serde(default)]
+pub struct Week {
+    pub ignore_dirs: Vec<String>,
+    /// Regexes on a note's path relative to home (the plugin's are Lua
+    /// patterns: `%.materials%.md$` here is `\.materials\.md$`).
+    pub ignore_patterns: Vec<String>,
+    pub digest: Digest,
+}
+
+impl Default for Week {
+    fn default() -> Self {
+        Week { ignore_dirs: vec!["templates".into()], ignore_patterns: Vec::new(), digest: Digest::default() }
+    }
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(default)]
+pub struct Digest {
+    /// Body lines quoted per note.
+    pub lines: usize,
+    pub tasks: bool,
+    pub marks: DigestMarks,
+    pub calendar: bool,
+    /// Weeks looked ahead (0: none).
+    pub ahead: u32,
+    pub sources: Vec<DigestSource>,
+    pub labels: DigestLabels,
+}
+
+impl Default for Digest {
+    fn default() -> Self {
+        Digest {
+            lines: 8,
+            tasks: true,
+            marks: DigestMarks::default(),
+            calendar: true,
+            ahead: 1,
+            sources: Vec::new(),
+            labels: DigestLabels::default(),
+        }
+    }
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(default)]
+pub struct DigestMarks {
+    pub done: String,
+    pub open: String,
+}
+
+impl Default for DigestMarks {
+    fn default() -> Self {
+        DigestMarks { done: "✓".into(), open: "☐".into() }
+    }
+}
+
+/// An extra section of the digest: the output of a shell command, run in
+/// home, with `{from}` `{to}` (the week) and `{ahead_from}` `{ahead_to}`
+/// replaced. (The plugin's sources are Lua functions.)
+#[derive(Debug, Clone, Deserialize)]
+pub struct DigestSource {
+    pub label: String,
+    pub command: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(default)]
+pub struct DigestLabels {
+    /// `{}` is the number of notes.
+    pub notes: String,
+    pub calendar: String,
+    pub finished: String,
+    pub open: String,
+    pub ahead: String,
+    pub due: String,
+    pub unavailable: String,
+}
+
+impl Default for DigestLabels {
+    fn default() -> Self {
+        DigestLabels {
+            notes: "{} notes".into(),
+            calendar: "Calendar".into(),
+            finished: "Finished this week".into(),
+            open: "Still open in this week's notes".into(),
+            ahead: "Coming up".into(),
+            due: "Due".into(),
+            unavailable: "unavailable".into(),
         }
     }
 }

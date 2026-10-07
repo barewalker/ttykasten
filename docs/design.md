@@ -47,9 +47,9 @@ lives outside it, in a single executable.
 - log: list and create daily and weekly notes
 - find: find notes
 
-Next steps: the week digest and calendar, then notes and search (romaji
-find, full-text search, tags, recent notes, template picker, rename, link
-graph). (Block links and tasks are done: see Progress.)
+Next steps: notes and search (romaji find, full-text search, tags, recent
+notes, template picker, rename, link graph). (Block links, tasks and the
+week digest are done: see Progress.)
 
 ## Language
 
@@ -162,4 +162,25 @@ on every start, so changes need no rebuild.
   header; undo keeps the entry so it can be retried after saving.
 - `nvim_swap_dir` overrides the location; "" turns the check off.
 - Verified with a real Neovim: refused while unsaved, written after `:w`.
+
+2026-10-07 (evening): the week view, the digest and the calendar.
+
+- `week [SPEC]` lists the notes dated in a week (§11); `digest [SPEC]` builds
+  the plugin's digest_lines: notes with outline and excerpt, the calendar,
+  tasks finished in the week and open in its notes, sources, and the week
+  ahead. On a terminal it goes through `pager`, coloured; piped, it is the
+  Markdown itself.
+- The calendar (§12) runs gcalcli (or `calendar.command`), parses its TSV by
+  header, caches it for `cache.ttl`, and falls back to a stale cache with
+  "(… as of MM-DD HH:MM)". `{{agenda}}` and `{{agenda_week}}` are filled,
+  and like the plugin they say "calendar unavailable: …" when it is off.
+- The plugin's digest sources are Lua functions; here they are shell
+  commands with {from} {to} {ahead_from} {ahead_to}.
+- Checked against the plugin with a fake gcalcli and a fake mail command:
+  the digest and a daily note using {{agenda}} / {{agenda_week}} are
+  identical. On a real collection (calendar and sources off), three weeks
+  had the same lines; two differed only in the order of tasks with equal
+  sort keys (the same done_at or due), because Lua's table.sort is not
+  stable. ttykasten keeps them in "added" order. A tie-breaker in the plugin
+  (path, then line) would make both orders the same.
 

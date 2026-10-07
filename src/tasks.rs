@@ -263,6 +263,12 @@ impl<'a> Scanner<'a> {
 
     /// A note's date (§8.4): `date_patterns`, then the file name, then the
     /// frontmatter keys. Never the file's mtime.
+    /// A note's date (§8.4), as the week views read it too.
+    pub fn date_of(&self, rel: &str, lines: &[String]) -> Option<String> {
+        let (fm, _) = frontmatter(lines);
+        self.note_date(rel, lines, &fm)
+    }
+
     fn note_date(&self, rel: &str, lines: &[String], fm: &HashMap<&str, &str>) -> Option<String> {
         let first_date = |s: &str| self.date.find(s).map(|m| m.as_str().to_string());
         for line in lines.iter().take(self.cfg.tasks.date_lines) {
