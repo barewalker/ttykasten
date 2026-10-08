@@ -11,6 +11,7 @@ use std::fs;
 use std::io::{IsTerminal, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode, Stdio};
+use std::time::SystemTime;
 
 use anyhow::{Context, Result, anyhow, bail};
 use chrono::{Local, NaiveDate, NaiveDateTime};
@@ -20,7 +21,7 @@ use ttykasten::i18n::{Msgs, fill};
 use ttykasten::note::{self, Periodic};
 use ttykasten::journal::{Entry, Journal, Undo};
 use ttykasten::tasks::{self, Scanner, Sort, Want};
-use ttykasten::{blockid, calendar, fileio, link, nvimswap, preview, task, template, trim, week};
+use ttykasten::{blockid, calendar, fileio, link, nvimswap, preview, romaji, task, template, trim, week};
 
 fn main() -> ExitCode {
     match run() {
@@ -68,6 +69,10 @@ fn run() -> Result<()> {
     match cmd {
         // Called by fzf to fill and re-sort the task list.
         "task-lines" => return app.print_task_lines(rest),
+        "find-change" => return app.find_change(rest),
+        "find-romaji" => return app.find_romaji(rest),
+        "find-all" => return app.find_all(rest),
+        "grep-lines" => return app.grep_lines(rest.first().map_or("", String::as_str)),
         "task-key" => return app.task_key(rest),
         "task-due" => return app.task_due(rest),
         "task-capture" => {
@@ -107,6 +112,14 @@ impl App {
             }
             "week" => self.week(arg.as_deref().unwrap_or("")),
             "digest" => self.digest(arg.as_deref().unwrap_or("")),
+            "grep" => self.grep(),
+            "tags" => self.tags(),
+            "recent" => self.recent(),
+            "rename" => self.rename(),
+            "links" => self.links(),
+            "orphans" => self.orphans(),
+            "dead-links" => self.dead_links(),
+            "hubs" => self.hubs(),
             "link" => self.link(),
             "link-daily" => self.link_daily(),
             "backlinks" => self.backlinks(),
@@ -206,7 +219,8 @@ impl App {
         if path.exists() {
             eprintln!("ttykasten: {}", fill(self.msg.opening_existing, &[&path.display()]));
         } else {
-            let content = match &self.cfg.new_note_template {
+            let picked = if self.cfg.pick_template { self.pick_template()? } else { None };
+            let content = match picked.as_ref().or(self.cfg.new_note_template.as_ref()) {
                 Some(t) => {
                     let now = now();
                     template::load(&self.home, &self.cfg.hdate_format, t, &title, now, &|k| self.agenda(k, now))
@@ -324,32 +338,491 @@ impl App {
         self.open_periodic(Periodic::Daily, note::days_from(date.and_time(now.time()), 0))
     }
 
-    /// Finds a note (§7). rg's listing is piped straight into fzf.
+    /// Finds a note (§7) by path with fzf. With romaji on, a query starting
+    /// with `/` is turned into a regex by `ttyskk migemo` and matched against
+    /// each note's path and headings instead.
     fn find(&self) -> Result<()> {
-        let glob = format!("*.{}", self.cfg.extension);
-        let mut rg = Command::new("rg")
-            .args(["--files", "--no-messages", "--no-ignore-vcs", "--glob", &glob])
-            .current_dir(&self.home)
-            .stdout(Stdio::piped())
-            .spawn()
-            .with_context(|| fill(self.msg.cannot_start, &[&"rg"]))?;
-        let stdout = rg.stdout.take().context("rg")?;
-        let mut args = vec![
-            "--scheme=path".to_string(),
-            format!("--prompt={}", self.msg.prompt_find),
-        ];
+        let files = self.note_files("--no-ignore-vcs")?;
+        let items: String = files.iter().map(|f| format!("{f}\n")).collect();
+        let mut args = vec!["--scheme=path".to_string(), format!("--prompt={}", self.msg.prompt_find)];
+        let index = if romaji::available(&self.cfg.romaji) { Some(self.write_find_index(&files)?) } else { None };
+        if let Some(index) = &index {
+            let exe = self.self_command()?;
+            let idx = shell_quote(&index.to_string_lossy());
+            args.push(format!("--header={}", self.msg.romaji_hint));
+            args.push("--bind=start:unbind(change)".into());
+            args.push(format!("--bind=change:transform:{exe} find-change {idx} {{q}}"));
+            args.push("--bind=/:transform:[ -z {q} ] && echo 'rebind(change)+put(/)' || echo 'put(/)'".into());
+        }
         args.extend(self.preview_arg("{}")?);
         let args: Vec<&str> = args.iter().map(String::as_str).collect();
-        let out = self.run_fzf(Stdio::from(stdout), None, &args);
-        let _ = rg.kill();
-        let _ = rg.wait();
-        let Some(out) = out? else {
-            return Ok(());
-        };
-        match out.first() {
+        let out = self.fzf(&items, &args);
+        if let Some(index) = &index {
+            let _ = fs::remove_file(index);
+        }
+        match out?.as_ref().and_then(|o| o.first()) {
             Some(rel) if !rel.is_empty() => self.edit(&self.home.join(rel)),
             _ => Ok(()),
         }
+    }
+
+    /// The romaji index for `find`: each note's path, then its path and
+    /// heading lines as one line, tab separated.
+    fn write_find_index(&self, files: &[String]) -> Result<PathBuf> {
+        let mut headings: HashMap<String, Vec<String>> = HashMap::new();
+        if self.cfg.romaji.headings {
+            let glob = format!("*.{}", self.cfg.extension);
+            let out = Command::new("rg")
+                .args(["--no-messages", "--no-ignore-vcs", "--heading", "--with-filename", "--no-line-number"])
+                .args(["--color", "never", "--glob", &glob, "-e", r"^#+\s+\S"])
+                .current_dir(&self.home)
+                .output()
+                .with_context(|| fill(self.msg.cannot_start, &[&"rg"]))?;
+            let text = String::from_utf8_lossy(&out.stdout);
+            let mut current: Option<String> = None;
+            for line in text.lines() {
+                match &current {
+                    _ if line.is_empty() => current = None,
+                    None => current = Some(line.to_string()),
+                    Some(rel) => headings.entry(rel.clone()).or_default().push(line.to_string()),
+                }
+            }
+        }
+        let mut tsv = String::new();
+        for rel in files {
+            let mut text = rel.clone();
+            for h in headings.get(rel).into_iter().flatten() {
+                text.push(' ');
+                text.push_str(h);
+            }
+            tsv.push_str(&format!("{rel}\t{}\n", text.replace(['\t', '\n'], " ")));
+        }
+        let path = env::temp_dir().join(format!("ttykasten-find-{}.tsv", std::process::id()));
+        fs::write(&path, tsv)?;
+        Ok(path)
+    }
+
+    /// `find-change INDEX QUERY`: what a changed query means to fzf. While it
+    /// starts with `/`, fzf's own matching is off and the list is the romaji
+    /// match; once it doesn't, fzf matches again and stops asking.
+    fn find_change(&self, args: &[String]) -> Result<()> {
+        let index = shell_quote(args.first().map_or("", String::as_str));
+        let exe = self.self_command()?;
+        if args.get(1).is_some_and(|q| q.starts_with('/')) {
+            println!("disable-search+reload({exe} find-romaji {index} {{q}})");
+        } else {
+            println!("enable-search+unbind(change)+reload({exe} find-all {index})");
+        }
+        Ok(())
+    }
+
+    /// `find-romaji INDEX QUERY`: the notes whose path or headings match the
+    /// romaji after the `/`. Anything it can't answer lists every note, since
+    /// an empty list would read as "nothing matched".
+    fn find_romaji(&self, args: &[String]) -> Result<()> {
+        let text = fs::read_to_string(args.first().map_or("", String::as_str)).unwrap_or_default();
+        let query = args.get(1).map_or("", String::as_str);
+        let query = query.strip_prefix('/').unwrap_or(query);
+        let re = romaji::regex(&self.cfg.romaji, query).and_then(|r| regex::Regex::new(&r).ok());
+        let mut out = std::io::stdout().lock();
+        for line in text.lines() {
+            let (rel, hay) = line.split_once('\t').unwrap_or((line, line));
+            if re.as_ref().is_none_or(|re| re.is_match(hay)) {
+                let _ = writeln!(out, "{rel}");
+            }
+        }
+        Ok(())
+    }
+
+    /// `find-all INDEX`: every note in the index.
+    fn find_all(&self, args: &[String]) -> Result<()> {
+        let text = fs::read_to_string(args.first().map_or("", String::as_str)).unwrap_or_default();
+        let mut out = std::io::stdout().lock();
+        for line in text.lines() {
+            let _ = writeln!(out, "{}", line.split_once('\t').map_or(line, |(rel, _)| rel));
+        }
+        Ok(())
+    }
+
+    /// Full-text search (SearchContent): rg runs again as the query changes.
+    /// A query starting with `/` is romaji. Enter opens the line.
+    fn grep(&self) -> Result<()> {
+        let exe = self.self_command()?;
+        let mut args = vec![
+            "--disabled".to_string(),
+            "--delimiter=\t".into(),
+            "--with-nth=3..".into(),
+            format!("--prompt={}", self.msg.prompt_grep),
+            format!("--bind=change:reload:{exe} grep-lines {{q}}"),
+            "--preview-window=+{2}-/2".into(),
+        ];
+        if self.cfg.romaji.enabled {
+            args.push(format!("--header={}", self.msg.romaji_hint));
+        }
+        args.extend(self.preview_arg("{1} {2}")?);
+        let args: Vec<&str> = args.iter().map(String::as_str).collect();
+        let Some(out) = self.fzf("", &args)? else {
+            return Ok(());
+        };
+        self.open_listed(out.first())
+    }
+
+    /// Opens `rel\tline\t…` as picked from a list.
+    fn open_listed(&self, picked: Option<&String>) -> Result<()> {
+        let mut fields = picked.map(|l| l.split('\t')).into_iter().flatten();
+        match (fields.next(), fields.next().and_then(|n| n.parse::<usize>().ok())) {
+            (Some(rel), Some(lineno)) if !rel.is_empty() => self.edit_at(&self.home.join(rel), lineno),
+            _ => Ok(()),
+        }
+    }
+
+    /// `grep-lines QUERY`: rg over every note (ignore files disregarded, as
+    /// the plugin's grep does), as `rel\tline\trel:line: text`.
+    fn grep_lines(&self, query: &str) -> Result<()> {
+        let query = trim(query);
+        if query.is_empty() || query == "/" {
+            return Ok(());
+        }
+        let pattern = match query.strip_prefix('/') {
+            Some(r) => romaji::regex(&self.cfg.romaji, r).unwrap_or_else(|| regex::escape(r)),
+            None => query.to_string(),
+        };
+        let print = |fixed: bool| -> Result<bool> {
+            let glob = format!("*.{}", self.cfg.extension);
+            let mut cmd = Command::new("rg");
+            cmd.args(["--no-ignore", "--no-messages", "--null", "--line-number", "--no-heading", "--color=never"])
+                .args(["--smart-case", "--glob", &glob]);
+            if fixed {
+                cmd.arg("--fixed-strings");
+            }
+            let out = cmd.args(["-e", &pattern]).current_dir(&self.home).output()?;
+            if out.status.code() == Some(2) && !fixed {
+                return Ok(false);
+            }
+            let text = String::from_utf8_lossy(&out.stdout);
+            let mut w = std::io::stdout().lock();
+            for record in text.lines() {
+                if let Some((file, rest)) = record.split_once('\0')
+                    && let Some((lineno, line)) = rest.split_once(':')
+                {
+                    let _ = writeln!(w, "{file}\t{lineno}\t{file}:{lineno}: {}", trim(line).replace('\t', " "));
+                }
+            }
+            Ok(true)
+        };
+        // A query that isn't a valid regex is searched as plain text.
+        if !print(false)? {
+            print(true)?;
+        }
+        Ok(())
+    }
+
+    /// Tags (SearchByTag): every `#tag` with how often it occurs, then the
+    /// lines that carry the one picked.
+    fn tags(&self) -> Result<()> {
+        let glob = format!("*.{}", self.cfg.extension);
+        let out = Command::new("rg")
+            .args(["--no-ignore", "--no-messages", "--no-filename", "--no-line-number", "-o", "--glob", &glob])
+            .args(["-e", "#[A-Za-z0-9_-]+"])
+            .current_dir(&self.home)
+            .output()
+            .with_context(|| fill(self.msg.cannot_start, &[&"rg"]))?;
+        let mut counts: std::collections::BTreeMap<String, usize> = std::collections::BTreeMap::new();
+        for tag in String::from_utf8_lossy(&out.stdout).lines() {
+            *counts.entry(tag.to_string()).or_default() += 1;
+        }
+        if counts.is_empty() {
+            eprintln!("ttykasten: {}", self.msg.nothing_found);
+            return Ok(());
+        }
+        let items: String = counts.iter().map(|(t, n)| format!("{t}\t{t}  ({n})\n")).collect();
+        let args = ["--delimiter=\t", "--with-nth=2..", &format!("--prompt={}", self.msg.prompt_tag)];
+        let Some(out) = self.fzf(&items, &args)? else {
+            return Ok(());
+        };
+        let Some(tag) = out.first().and_then(|l| l.split('\t').next()).filter(|t| !t.is_empty()) else {
+            return Ok(());
+        };
+        let pattern = format!("{}([^A-Za-z0-9_-]|$)", regex::escape(tag));
+        let out = Command::new("rg")
+            .args(["--no-ignore", "--no-messages", "--null", "--line-number", "--no-heading", "--color=never"])
+            .args(["--glob", &glob, "-e", &pattern])
+            .current_dir(&self.home)
+            .output()?;
+        let mut lines: Vec<(String, usize, String)> = String::from_utf8_lossy(&out.stdout)
+            .lines()
+            .filter_map(|r| {
+                let (file, rest) = r.split_once('\0')?;
+                let (n, text) = rest.split_once(':')?;
+                Some((file.to_string(), n.parse().ok()?, trim(text).replace('\t', " ")))
+            })
+            .collect();
+        lines.sort();
+        let items: String = lines.iter().map(|(f, n, t)| format!("{f}\t{n}\t{f}:{n}: {t}\n")).collect();
+        let mut args = vec![
+            "--delimiter=\t".to_string(),
+            "--with-nth=3..".into(),
+            format!("--prompt={tag}> "),
+            "--preview-window=+{2}-/2".into(),
+        ];
+        args.extend(self.preview_arg("{1} {2}")?);
+        let args: Vec<&str> = args.iter().map(String::as_str).collect();
+        let Some(out) = self.fzf(&items, &args)? else {
+            return Ok(());
+        };
+        self.open_listed(out.first())
+    }
+
+    /// Recent notes (`:FzfKastenRecent`): every note under home, `.git`
+    /// pruned and `recent.ignore_dirs` left out, newest first.
+    fn recent(&self) -> Result<()> {
+        let ext = format!(".{}", self.cfg.extension);
+        let mut found: Vec<(SystemTime, String)> = Vec::new();
+        let mut stack = vec![self.home.clone()];
+        while let Some(dir) = stack.pop() {
+            let Ok(entries) = fs::read_dir(&dir) else {
+                continue;
+            };
+            for e in entries.flatten() {
+                let path = e.path();
+                let Ok(ft) = e.file_type() else {
+                    continue;
+                };
+                if ft.is_dir() {
+                    if e.file_name() != ".git" {
+                        stack.push(path);
+                    }
+                    continue;
+                }
+                let Ok(rel) = path.strip_prefix(&self.home) else {
+                    continue;
+                };
+                let rel = rel.to_string_lossy().into_owned();
+                let ignored = self.cfg.recent.ignore_dirs.iter().any(|d| rel == *d || rel.strip_prefix(d.as_str()).is_some_and(|r| r.starts_with('/')));
+                if rel.ends_with(&ext) && !ignored
+                    && let Ok(m) = e.metadata().and_then(|m| m.modified())
+                {
+                    found.push((m, rel));
+                }
+            }
+        }
+        found.sort_by(|a, b| b.0.cmp(&a.0).then(a.1.cmp(&b.1)));
+        found.truncate(self.cfg.recent.limit);
+        let today = Local::now().date_naive();
+        let items: String = found
+            .iter()
+            .map(|(m, rel)| {
+                let t: chrono::DateTime<Local> = (*m).into();
+                let when = if t.date_naive() == today {
+                    format!("{} {}", self.msg.recent_today, t.format("%H:%M"))
+                } else {
+                    t.format("%m-%d %a").to_string()
+                };
+                format!("{rel}\t{when:<11} {rel}\n")
+            })
+            .collect();
+        let mut args = vec!["--delimiter=\t".to_string(), "--with-nth=2..".into(), "--no-sort".into(), format!("--prompt={}", self.msg.prompt_recent)];
+        args.extend(self.preview_arg("{1}")?);
+        let args: Vec<&str> = args.iter().map(String::as_str).collect();
+        let Some(out) = self.fzf(&items, &args)? else {
+            return Ok(());
+        };
+        match out.first().and_then(|l| l.split('\t').next()) {
+            Some(rel) if !rel.is_empty() => self.edit(&self.home.join(rel)),
+            _ => Ok(()),
+        }
+    }
+
+    /// Picks a note from the finder's list (with preview); its path relative
+    /// to home.
+    fn pick_note(&self, prompt: &str) -> Result<Option<String>> {
+        let files = self.note_files("--no-ignore-vcs")?;
+        let items: String = files.iter().map(|f| format!("{f}\n")).collect();
+        let mut args = vec!["--scheme=path".to_string(), format!("--prompt={prompt}")];
+        args.extend(self.preview_arg("{}")?);
+        let args: Vec<&str> = args.iter().map(String::as_str).collect();
+        Ok(self.fzf(&items, &args)?.and_then(|o| o.into_iter().next()).filter(|r| !r.is_empty()))
+    }
+
+    /// The template for a new note, picked from `home/templates/` with the
+    /// default first. None (Esc) means the default.
+    fn pick_template(&self) -> Result<Option<String>> {
+        let dir = self.home.join("templates");
+        let out = Command::new("rg").args(["--files", "--no-messages", "--no-ignore"]).current_dir(&dir).output();
+        let Ok(out) = out else {
+            return Ok(None);
+        };
+        let mut files: Vec<String> = String::from_utf8_lossy(&out.stdout).lines().map(str::to_string).collect();
+        if files.is_empty() {
+            return Ok(None);
+        }
+        files.sort();
+        let default = self.cfg.new_note_template.as_deref().map(|t| t.strip_prefix("templates/").unwrap_or(t).to_string());
+        if let Some(d) = &default
+            && let Some(i) = files.iter().position(|f| f == d)
+        {
+            let f = files.remove(i);
+            files.insert(0, f);
+        }
+        let items: String = files.iter().map(|f| format!("{f}\n")).collect();
+        let mut args = vec!["--no-sort".to_string(), format!("--prompt={}", self.msg.prompt_template)];
+        args.extend(self.preview_arg("templates/{}")?);
+        let args: Vec<&str> = args.iter().map(String::as_str).collect();
+        // Only the basename is kept, as in the plugin.
+        Ok(self
+            .fzf(&items, &args)?
+            .and_then(|o| o.into_iter().next())
+            .filter(|f| !f.is_empty())
+            .map(|f| f.rsplit('/').next().unwrap_or(&f).to_string()))
+    }
+
+    /// Rename (§9.2): moves the note, sanitising the new name, then rewrites
+    /// every link to its old name in every note. Refuses before changing
+    /// anything when a note involved has unsaved changes in Neovim.
+    fn rename(&self) -> Result<()> {
+        let Some(rel) = self.pick_note(self.msg.prompt_find)? else {
+            return Ok(());
+        };
+        let old_path = self.home.join(&rel);
+        let old_name = link::note_name(Path::new(&rel));
+        let out = self.run_fzf(
+            Stdio::null(),
+            None,
+            &[
+                &format!("--prompt={}", self.msg.prompt_rename),
+                &format!("--query={old_name}"),
+                "--print-query",
+                "--disabled",
+                "--info=hidden",
+                "--no-separator",
+                "--height=1",
+                "--layout=reverse",
+            ],
+        )?;
+        let Some(raw) = out.and_then(|o| o.into_iter().next()) else {
+            return Ok(());
+        };
+        let Some(new_name) = note::sanitize_filename(&raw) else {
+            bail!(fill(self.msg.no_file_name, &[&format!("{raw:?}")]));
+        };
+        if new_name == old_name {
+            return Ok(());
+        }
+        let ext = old_path.extension().map(|e| e.to_string_lossy().into_owned()).unwrap_or_default();
+        let new_path = old_path.with_file_name(format!("{new_name}.{ext}"));
+        if new_path.exists() {
+            bail!(fill(self.msg.rename_exists, &[&new_path.strip_prefix(&self.home).unwrap_or(&new_path).display()]));
+        }
+        // Every rewrite is worked out first, so nothing moves if one is refused.
+        let mut rewrites: Vec<(PathBuf, Vec<String>)> = Vec::new();
+        for file in self.note_files("--no-ignore")? {
+            let path = self.home.join(&file);
+            let Ok(lines) = fileio::read_lines(&path) else {
+                continue;
+            };
+            let mut changed = false;
+            let new_lines: Vec<String> = lines
+                .iter()
+                .map(|l| match link::retarget_line(l, &self.cfg.extension, &old_name, &new_name) {
+                    Some(n) => {
+                        changed = true;
+                        n
+                    }
+                    None => l.clone(),
+                })
+                .collect();
+            if changed {
+                rewrites.push((path, new_lines));
+            }
+        }
+        self.guard(&old_path)?;
+        for (path, _) in &rewrites {
+            self.guard(path)?;
+        }
+        fs::rename(&old_path, &new_path).with_context(|| fill(self.msg.cannot_write, &[&new_path.display()]))?;
+        for (path, lines) in &rewrites {
+            let target = if *path == old_path { &new_path } else { path };
+            fileio::write_lines(target, lines).with_context(|| fill(self.msg.cannot_write, &[&target.display()]))?;
+        }
+        println!("{}", fill(self.msg.renamed, &[&old_name, &new_name, &rewrites.len()]));
+        self.edit(&new_path)
+    }
+
+    /// The link graph over every note (the plugin's glob: hidden files skipped,
+    /// ignore files disregarded), in path order.
+    fn graph(&self) -> Result<ttykasten::graph::Graph> {
+        let mut files = self.note_files("--no-ignore")?;
+        files.sort();
+        let notes: Vec<(String, Vec<String>)> = files
+            .into_iter()
+            .filter_map(|rel| fileio::read_lines(&self.home.join(&rel)).ok().map(|l| (rel, l)))
+            .collect();
+        Ok(ttykasten::graph::build(&notes, &self.cfg.extension, &self.cfg.graph.ignore_dirs))
+    }
+
+    /// A list of `rel\tline\tshown` rows in fzf; enter opens the line.
+    fn pick_rows(&self, rows: &[(String, usize, String)], prompt: &str, header: &str) -> Result<()> {
+        if rows.is_empty() {
+            eprintln!("ttykasten: {}", self.msg.nothing_found);
+            return Ok(());
+        }
+        let items: String = rows.iter().map(|(r, n, t)| format!("{r}\t{n}\t{t}\n")).collect();
+        let mut args = vec![
+            "--delimiter=\t".to_string(),
+            "--with-nth=3..".into(),
+            "--no-sort".into(),
+            format!("--prompt={prompt}"),
+            format!("--header={header}"),
+            "--preview-window=+{2}-/2".into(),
+        ];
+        args.extend(self.preview_arg("{1} {2}")?);
+        let args: Vec<&str> = args.iter().map(String::as_str).collect();
+        let Some(out) = self.fzf(&items, &args)? else {
+            return Ok(());
+        };
+        self.open_listed(out.first())
+    }
+
+    /// LinkTree: a picked note and what it is linked with, `graph.depth`
+    /// links deep.
+    fn links(&self) -> Result<()> {
+        let Some(rel) = self.pick_note(self.msg.prompt_find)? else {
+            return Ok(());
+        };
+        let g = self.graph()?;
+        let root = link::note_name(Path::new(&rel));
+        let depth = self.cfg.graph.depth.max(1);
+        let mut rows = vec![(rel.clone(), 1, format!("● {root}"))];
+        rows.extend(ttykasten::graph::tree(&g, &root, depth).into_iter().map(|r| (r.rel, r.lineno, r.display)));
+        if rows.len() == 1 {
+            eprintln!("ttykasten: {}", self.msg.nothing_found);
+            return Ok(());
+        }
+        self.pick_rows(&rows, &fill(self.msg.links_prompt, &[&depth]), self.msg.links_header)
+    }
+
+    fn orphans(&self) -> Result<()> {
+        let rels = ttykasten::graph::orphans(&self.graph()?);
+        let rows: Vec<(String, usize, String)> = rels.into_iter().map(|r| (r.clone(), 1, r)).collect();
+        self.pick_rows(&rows, &fill(self.msg.orphans_prompt, &[&rows.len()]), "")
+    }
+
+    fn dead_links(&self) -> Result<()> {
+        let g = self.graph()?;
+        let rows: Vec<(String, usize, String)> = ttykasten::graph::dead_links(&g)
+            .into_iter()
+            .map(|e| (e.rel.clone(), e.lineno, format!("{}  ←  {}", e.to, e.line)))
+            .collect();
+        self.pick_rows(&rows, &fill(self.msg.dead_prompt, &[&rows.len()]), self.msg.dead_header)
+    }
+
+    fn hubs(&self) -> Result<()> {
+        let g = self.graph()?;
+        let rows: Vec<(String, usize, String)> = ttykasten::graph::hubs(&g)
+            .into_iter()
+            .map(|(name, rel, back, out)| (rel, 1, format!("{back:3} ←  {out:3} →   {name}")))
+            .collect();
+        self.pick_rows(&rows, &fill(self.msg.hubs_prompt, &[&rows.len()]), self.msg.hubs_header)
     }
 
     /// The task list or the inbox in fzf (§8). Enter opens the note at the
@@ -1494,4 +1967,9 @@ impl View {
         let sort = Sort::parse(words.next().unwrap_or(""));
         View { inbox, sort, closed: inside.contains("+closed") }
     }
+}
+
+/// Quotes a string for sh, for arguments fzf passes to a shell.
+fn shell_quote(s: &str) -> String {
+    format!("'{}'", s.replace('\'', r"'\''"))
 }

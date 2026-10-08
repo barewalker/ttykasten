@@ -51,6 +51,12 @@ pub struct Config {
     pub preview: Preview,
     pub calendar: Calendar,
     pub week: Week,
+    pub romaji: Romaji,
+    pub graph: Graph,
+    pub recent: Recent,
+    /// Ask which template a new note uses (the default is preselected; Esc
+    /// takes `new_note_template`), as the plugin does.
+    pub pick_template: bool,
     /// The pager for `digest` (gets coloured text); "" prints to stdout.
     pub pager: String,
 }
@@ -76,6 +82,10 @@ impl Default for Config {
             preview: Preview::default(),
             calendar: Calendar::default(),
             week: Week::default(),
+            romaji: Romaji::default(),
+            graph: Graph::default(),
+            recent: Recent::default(),
+            pick_template: true,
             pager: "less -R".into(),
         }
     }
@@ -344,6 +354,14 @@ pub const ACTIONS: &[&str] = &[
     "undo",
     "week",
     "digest",
+    "grep",
+    "tags",
+    "recent",
+    "rename",
+    "links",
+    "orphans",
+    "dead-links",
+    "hubs",
     "find",
     "new",
     "log",
@@ -366,6 +384,55 @@ impl Menu {
                 })
                 .collect(),
         }
+    }
+}
+
+/// Romaji search through `ttyskk migemo`: a query starting with `/` in
+/// `find` and `grep` is turned into a regex (`/kaigi` finds 会議).
+#[derive(Debug, Deserialize)]
+#[serde(default)]
+pub struct Romaji {
+    pub enabled: bool,
+    pub command: String,
+    pub limit: Option<u32>,
+    /// Milliseconds to wait for the command.
+    pub timeout: u64,
+    /// Match a note's headings as well as its path in `find`.
+    pub headings: bool,
+}
+
+impl Default for Romaji {
+    fn default() -> Self {
+        Romaji { enabled: true, command: "ttyskk".into(), limit: None, timeout: 5000, headings: true }
+    }
+}
+
+/// The link graph (`links`, `orphans`, `dead-links`, `hubs`).
+#[derive(Debug, Deserialize)]
+#[serde(default)]
+pub struct Graph {
+    /// How many links deep `links` goes.
+    pub depth: usize,
+    pub ignore_dirs: Vec<String>,
+}
+
+impl Default for Graph {
+    fn default() -> Self {
+        Graph { depth: 2, ignore_dirs: vec!["templates".into()] }
+    }
+}
+
+/// `recent`: notes by modification time.
+#[derive(Debug, Deserialize)]
+#[serde(default)]
+pub struct Recent {
+    pub limit: usize,
+    pub ignore_dirs: Vec<String>,
+}
+
+impl Default for Recent {
+    fn default() -> Self {
+        Recent { limit: 50, ignore_dirs: vec!["templates".into()] }
     }
 }
 

@@ -140,6 +140,43 @@ fn strip_bullet(text: &str) -> &str {
     }
 }
 
+/// Rename's link rewriting (`retarget`): every link whose name is `old`
+/// becomes `[[new#anchor|alias]]`, dropping its directory and extension.
+/// None when the line has no such link.
+pub fn retarget_line(line: &str, extension: &str, old: &str, new: &str) -> Option<String> {
+    let mut out = String::new();
+    let mut rest = line;
+    let mut changed = false;
+    while let Some(open) = rest.find("[[") {
+        let Some(close) = rest[open + 2..].find("]]") else {
+            break;
+        };
+        let inner = &rest[open + 2..open + 2 + close];
+        let end = open + 2 + close + 2;
+        out.push_str(&rest[..open]);
+        let l = split(inner, extension);
+        if l.name == old {
+            changed = true;
+            out.push_str("[[");
+            out.push_str(new);
+            if let Some(a) = l.anchor {
+                out.push('#');
+                out.push_str(a);
+            }
+            if let Some(a) = l.alias {
+                out.push('|');
+                out.push_str(a);
+            }
+            out.push_str("]]");
+        } else {
+            out.push_str(&rest[open..end]);
+        }
+        rest = &rest[end..];
+    }
+    out.push_str(rest);
+    changed.then_some(out)
+}
+
 /// The result of making a link to one line of a note.
 #[derive(Debug, PartialEq, Eq)]
 pub struct BlockLink {
@@ -210,6 +247,14 @@ mod tests {
         assert_eq!(split("note.v2", "md").name, "note.v2");
         assert_eq!(split("note.v2.md", "md").name, "note.v2");
         assert_eq!(split("a|b#c", "md").alias, Some("b#c"));
+    }
+
+    #[test]
+    fn retargeting() {
+        let r = |l| retarget_line(l, "md", "old note", "new");
+        assert_eq!(r("see [[old note]] and [[dir/old note.md#^a1b2c3|x]]").as_deref(), Some("see [[new]] and [[new#^a1b2c3|x]]"));
+        assert_eq!(r("[[old notes]] [[other]]"), None);
+        assert_eq!(r("[[old note#H#2|a|b]]").as_deref(), Some("[[new#H#2|a|b]]"));
     }
 
     #[test]

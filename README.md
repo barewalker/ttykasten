@@ -17,13 +17,15 @@ ttykasten find          # find a note, with a coloured preview
 ttykasten link          # pick any line of any note; copy [[note#^id]]
 ```
 
-Status: an early prototype. More search views (romaji, full text, tags,
-recent notes, the link graph) are planned (see [docs/design.md](docs/design.md)).
+Status: early, but it covers the plugin's note, task, link and week
+features (see [docs/design.md](docs/design.md)).
 
 ## Requirements
 
 - [fzf](https://github.com/junegunn/fzf) and [ripgrep](https://github.com/BurntSushi/ripgrep) on `PATH`
 - Rust 1.88 or later to build
+- Optional: [ttyskk](https://github.com/barewalker/ttyskk) for romaji search,
+  [gcalcli](https://github.com/insanum/gcalcli) for the calendar
 - Linux or macOS (WSL works)
 
 ## Install
@@ -48,11 +50,19 @@ cargo install --git https://github.com/barewalker/ttykasten
 | `undo` | undo the last task edit, even from an earlier run |
 | `week [WEEK]` | the notes dated in a week; `ctrl-d` shows its digest. `WEEK` is empty (this week), `-1`, `2026-W37` or a date |
 | `digest [WEEK]` | the week digest: each note's outline and opening lines, the calendar, tasks finished and still open, extra sources, and what is coming up next week |
-| `find` | find a note by path and open it |
-| `new [TITLE]` | create a note from the template and open it |
+| `find` | find a note by path and open it; a query starting with `/` is romaji, matched against paths and headings (`/kaigi` finds 会議) |
+| `grep` | search note contents as you type; `/` for romaji here too |
+| `tags` | every `#tag` with its count; pick one to list the lines carrying it |
+| `recent` | notes by when they were last changed |
+| `new [TITLE]` | create a note from a template (picked from `templates/`) and open it |
+| `rename` | rename a note and rewrite every link to it in every note |
 | `log` | list recent daily and weekly notes; `ctrl-x` picks a date |
 | `link` | pick a line of any note; give it a `^id` if it has none; copy `[[note#^id]]` |
 | `link-daily` | the same, and append `- [[note#^id]]` to today's daily note |
+| `links` | pick a note and see what it is linked with, a few steps deep (→ out, ← in, ↔ both) |
+| `orphans` | notes with no link in or out |
+| `dead-links` | links that no note answers to |
+| `hubs` | notes by how many links meet there |
 | `backlinks` | pick a line and list the lines linking to it (or, for a line with no id, to its note); open one at its line |
 | `config-example` | print an example config file |
 | `--version` | print the version and the commit it was built from |

@@ -5,14 +5,17 @@
 
 pub mod blockid;
 pub mod calendar;
+pub mod command;
 pub mod config;
 pub mod fileio;
+pub mod graph;
 pub mod i18n;
 pub mod journal;
 pub mod link;
 pub mod note;
 pub mod nvimswap;
 pub mod preview;
+pub mod romaji;
 pub mod task;
 pub mod tasks;
 pub mod template;

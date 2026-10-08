@@ -85,6 +85,31 @@ pub struct Msgs {
     pub desc_digest: &'static str,
     pub week_header: &'static str,
     pub no_notes_in_week: &'static str,
+    pub desc_grep: &'static str,
+    pub desc_tags: &'static str,
+    pub desc_recent: &'static str,
+    pub desc_rename: &'static str,
+    pub desc_links: &'static str,
+    pub desc_orphans: &'static str,
+    pub desc_dead_links: &'static str,
+    pub desc_hubs: &'static str,
+    pub romaji_hint: &'static str,
+    pub prompt_grep: &'static str,
+    pub prompt_tag: &'static str,
+    pub prompt_recent: &'static str,
+    pub prompt_rename: &'static str,
+    pub prompt_template: &'static str,
+    pub renamed: &'static str,
+    pub rename_exists: &'static str,
+    pub links_header: &'static str,
+    pub links_prompt: &'static str,
+    pub orphans_prompt: &'static str,
+    pub dead_prompt: &'static str,
+    pub dead_header: &'static str,
+    pub hubs_prompt: &'static str,
+    pub hubs_header: &'static str,
+    pub nothing_found: &'static str,
+    pub recent_today: &'static str,
 }
 
 const EN: Msgs = Msgs {
@@ -105,6 +130,14 @@ Usage: ttykasten [ACTION] [ARG…]
   undo            undo the last task edit (kept across runs)
   week [WEEK]     notes dated in a week (ctrl-d: its digest); WEEK is -1, 2026-W37 or a date
   digest [WEEK]   the week digest: notes, calendar, finished and open tasks, what's due next
+  grep            search note contents (a query starting with / is romaji)
+  tags            pick a tag, then a line carrying it
+  recent          notes by when they were last changed
+  rename          rename a note and rewrite every link to it
+  links           pick a note and see what it is linked with, a few steps deep
+  orphans         notes with no link in or out
+  dead-links      links that no note answers to
+  hubs            notes by how many links meet there
   find            find a note and open it
   new [TITLE]     create a note from the template
   log             list daily and weekly notes (ctrl-x: pick a date)
@@ -189,6 +222,31 @@ Config: $TTYKASTEN_CONFIG, else $XDG_CONFIG_HOME/ttykasten/config.toml.
     desc_digest: "Week digest",
     week_header: "{} to {} · ctrl-d digest",
     no_notes_in_week: "no notes dated {} ({} to {})",
+    desc_grep: "Search note contents (/ for romaji)",
+    desc_tags: "Pick a tag, then a line carrying it",
+    desc_recent: "Recently changed notes",
+    desc_rename: "Rename a note and rewrite the links to it",
+    desc_links: "A note's links, a few steps deep",
+    desc_orphans: "Notes linked to nothing",
+    desc_dead_links: "Links pointing at no note",
+    desc_hubs: "Notes where links meet",
+    romaji_hint: "prefix / for romaji: /kaigi → 会議",
+    prompt_grep: "grep> ",
+    prompt_tag: "tag> ",
+    prompt_recent: "recent> ",
+    prompt_rename: "new name> ",
+    prompt_template: "template> ",
+    renamed: "renamed {} to {}; links rewritten in {} note(s)",
+    rename_exists: "{} already exists",
+    links_header: "→ links out   ← links in   ↔ both",
+    links_prompt: "links {} deep> ",
+    orphans_prompt: "orphans ({})> ",
+    dead_prompt: "dead links ({})> ",
+    dead_header: "opens the line the link is written on",
+    hubs_prompt: "hubs ({})> ",
+    hubs_header: "linked to ←   links out →",
+    nothing_found: "nothing found",
+    recent_today: "today",
 };
 
 const JA: Msgs = Msgs {
@@ -209,6 +267,14 @@ const JA: Msgs = Msgs {
   undo            直前のタスクの書き換えを戻す (起動をまたいで残る)
   week [週]       その週の日付のノート (ctrl-d で週まとめ)。週は -1, 2026-W37, 日付
   digest [週]     週まとめ: ノート、予定、終えたタスクと残るタスク、翌週の期日
+  grep            ノートの本文を探す (/ で始めるとローマ字)
+  tags            タグを選び、そのタグの付いた行を探す
+  recent          最近書き換えたノート
+  rename          ノートの名前を変え、そこへのリンクをすべて直す
+  links           ノートを選び、リンクでつながるノートを数段たどる
+  orphans         リンクの出入りが無いノート
+  dead-links      行き先のノートが無いリンク
+  hubs            リンクの集まるノート
   find            ノートを探して開く
   new [題名]      雛形から新しいノートを作る
   log             日誌と週まとめの一覧 (ctrl-x で日付を指定)
@@ -293,6 +359,31 @@ const JA: Msgs = Msgs {
     desc_digest: "週まとめ",
     week_header: "{} 〜 {} · ctrl-d 週まとめ",
     no_notes_in_week: "{} ({} 〜 {}) の日付のノートは無い",
+    desc_grep: "ノートの本文を探す (/ でローマ字)",
+    desc_tags: "タグを選び、そのタグの付いた行を探す",
+    desc_recent: "最近書き換えたノート",
+    desc_rename: "ノートの名前を変え、そこへのリンクも直す",
+    desc_links: "ノートのリンクのつながり",
+    desc_orphans: "どこともつながっていないノート",
+    desc_dead_links: "行き先のノートが無いリンク",
+    desc_hubs: "リンクの集まるノート",
+    romaji_hint: "/ で始めるとローマ字: /kaigi → 会議",
+    prompt_grep: "grep> ",
+    prompt_tag: "tag> ",
+    prompt_recent: "recent> ",
+    prompt_rename: "新しい名前> ",
+    prompt_template: "雛形> ",
+    renamed: "{} を {} に変えた。リンクを直したノート: {}",
+    rename_exists: "{} は既にある",
+    links_header: "→ リンク先   ← リンク元   ↔ 両方",
+    links_prompt: "links {} deep> ",
+    orphans_prompt: "orphans ({})> ",
+    dead_prompt: "dead links ({})> ",
+    dead_header: "リンクの書かれた行を開く",
+    hubs_prompt: "hubs ({})> ",
+    hubs_header: "← リンクされた数   → リンクした数",
+    nothing_found: "見つからない",
+    recent_today: "今日",
 };
 
 impl Language {
@@ -325,6 +416,14 @@ impl Msgs {
             "undo" => self.desc_undo,
             "week" => self.desc_week,
             "digest" => self.desc_digest,
+            "grep" => self.desc_grep,
+            "tags" => self.desc_tags,
+            "recent" => self.desc_recent,
+            "rename" => self.desc_rename,
+            "links" => self.desc_links,
+            "orphans" => self.desc_orphans,
+            "dead-links" => self.desc_dead_links,
+            "hubs" => self.desc_hubs,
             _ => return None,
         })
     }

@@ -47,9 +47,8 @@ lives outside it, in a single executable.
 - log: list and create daily and weekly notes
 - find: find notes
 
-Next steps: notes and search (romaji find, full-text search, tags, recent
-notes, template picker, rename, link graph). (Block links, tasks and the
-week digest are done: see Progress.)
+Next steps: see the future-work list in Progress; the plugin's note, task,
+link and week features are covered.
 
 ## Language
 
@@ -183,4 +182,27 @@ on every start, so changes need no rebuild.
   sort keys (the same done_at or due), because Lua's table.sort is not
   stable. ttykasten keeps them in "added" order. A tie-breaker in the plugin
   (path, then line) would make both orders the same.
+
+2026-10-08: notes and search.
+
+- `find` with romaji: a query starting with `/` switches fzf's own matching
+  off and reloads the list with the notes whose path or headings match the
+  regex `ttyskk migemo --flavour rg` makes; leaving the `/` switches it back
+  (the plugin's shell binds, done with hidden subcommands).
+- `grep` (SearchContent): rg as you type, ignore files disregarded; `/` for
+  romaji; a query that is not a valid regex is searched as plain text.
+- `tags` (SearchByTag): every tag with its count, then the lines carrying it.
+- `recent`: notes by mtime, .git pruned, `recent.ignore_dirs` left out.
+- `new` picks a template from `templates/` (default first; Esc = default).
+- `rename` (§9.2): sanitises the new name, refuses an existing target or a
+  note with unsaved changes in Neovim before touching anything, moves the
+  file and rewrites every link to the old name.
+- The link graph: `links` (tree), `orphans`, `dead-links`, `hubs`, built
+  like graph.lua (fences and code spans skipped, self-links dropped).
+- The week digest's ties now follow the plugin's new tie-breakers
+  (done_at or due, then path, then line).
+- Checked: on a real collection the graph (orphans, dead links, hubs and
+  three trees) is identical to graph.lua's; rename is byte-identical to
+  rename_note on a scratch collection; the real digests for three weeks are
+  identical, ties included.
 

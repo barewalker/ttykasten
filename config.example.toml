@@ -23,6 +23,10 @@ hdate_format = "%B %d, %Y"
 # Template for new notes (inside home/templates/). Unset: just "# Title".
 # new_note_template = "templates/template_new_note.md"
 
+# Ask which template a new note uses (the default listed first; Esc takes
+# new_note_template), as the plugin does.
+pick_template = true
+
 # Editor that opens notes. Unset: $EDITOR, else nvim.
 # editor = "nvim"
 
@@ -116,6 +120,26 @@ command = "fzf"
 opts = []               # extra arguments for every fzf, e.g. ["--border", "--height=60%"]
 preview = true          # show the note next to the list
 
+# Romaji search through `ttyskk migemo`: in `find` and `grep`, a query
+# starting with / is turned into a regex (/kaigi finds 会議). Off by itself
+# when ttyskk is not installed.
+[romaji]
+enabled = true
+command = "ttyskk"
+# limit = 100              # passed as --limit
+timeout = 5000             # milliseconds
+headings = true            # `find` matches headings as well as paths
+
+# `links`, `orphans`, `dead-links`, `hubs`.
+[graph]
+depth = 2                  # how many links deep `links` goes
+ignore_dirs = ["templates"]
+
+# `recent`.
+[recent]
+limit = 50
+ignore_dirs = ["templates"]
+
 # The calendar, for {{agenda}} / {{agenda_week}} in templates and for the
 # week digest. Read through gcalcli (set up and authenticated outside
 # ttykasten), or any command that prints the same TSV.
@@ -176,8 +200,9 @@ mark = "7"              # the picked line in `link` and `backlinks`
 # The menu shown when ttykasten runs with no arguments. Unset: every action,
 # in the default order. Set: only the items written, in the order written.
 #   action   a ttykasten action: daily weekly capture tasks inbox
-#            capture-guided tag mint-ids undo week digest find new log
-#            link link-daily backlinks
+#            capture-guided tag mint-ids undo week digest find grep tags
+#            recent new rename log link link-daily backlinks links orphans
+#            dead-links hubs
 #   command  a shell command to run instead (sh -c, in home)
 #   key      a hint shown in the list; `ttykasten <key>` also runs the item
 #   label    the description; unset uses the language's default

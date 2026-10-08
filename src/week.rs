@@ -260,8 +260,9 @@ pub fn digest_lines(
                 }
             }
         }
-        finished.sort_by(|a, b| a.done_at.cmp(&b.done_at));
-        due_ahead.sort_by(|a, b| a.due.cmp(&b.due));
+        // Equal keys fall back to path, then line, as in the plugin.
+        finished.sort_by(|a, b| a.done_at.cmp(&b.done_at).then(a.rel.cmp(&b.rel)).then(a.lineno.cmp(&b.lineno)));
+        due_ahead.sort_by(|a, b| a.due.cmp(&b.due).then(a.rel.cmp(&b.rel)).then(a.lineno.cmp(&b.lineno)));
         if !finished.is_empty() {
             let rows = finished.iter().map(|t| task_line(t, &d.marks.done)).collect();
             section(&mut out, format!("{} ({})", l.finished, finished.len()), rows);
