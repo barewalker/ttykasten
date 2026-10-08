@@ -988,10 +988,12 @@ impl App {
         let header = if message.is_empty() {
             self.keys_header()
         } else {
-            // The message first: a narrow window cuts the end of the header.
-            format!("{message}  │  {}", self.keys_header())
+            // The outcome on a line of its own above the key help, so neither
+            // is cut off in a narrow window.
+            format!("{message}\n{}", self.keys_header())
         };
-        // change-header takes the rest of the string, so it goes last.
+        // change-header takes the rest of the output, newlines included, so
+        // it goes last.
         println!(
             "change-prompt({})+reload({exe} task-lines {} {sort}{closed})+change-header:{header}",
             self.view_prompt(view),
