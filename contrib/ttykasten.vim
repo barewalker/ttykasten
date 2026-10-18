@@ -35,41 +35,62 @@ let g:loaded_ttykasten = 1
 let s:cmd = get(g:, 'ttykasten_command', 'ttykasten')
 
 " Runs ttykasten with --print where it can draw fzf, then calls Done with
-" what it printed, as a list of lines.
+" what it printed, as a list of lines. fzf draws on the terminal itself, so
+" stderr can be kept for the messages, which the terminal would lose.
 function! s:run(args, Done) abort
   " ttykasten may write to any note; saving this one keeps both sides' edits.
   silent! update
   let out = tempname()
-  let cmd = s:cmd . ' --print ' . a:args . ' >' . shellescape(out)
+  let err = tempname()
+  let cmd = s:cmd . ' --print ' . a:args . ' >' . shellescape(out) . ' 2>' . shellescape(err)
   if has('nvim')
     " Neovim's :! has no terminal to draw on, so fzf gets a terminal tab.
     let tab = tabpagenr()
     tabnew
-    call termopen(cmd, {'on_exit': function('s:nvim_exit', [bufnr('%'), tab, out, a:Done])})
+    call termopen(cmd, {'on_exit': function('s:nvim_exit', [bufnr('%'), tab, out, err, a:Done])})
     startinsert
   else
     " :! reads % # and ! as file names and the last command.
     execute 'silent !' . escape(cmd, '%#!')
     redraw!
-    call s:finish(out, a:Done)
+    call s:finish(out, err, a:Done)
   endif
 endfunction
 
-function! s:nvim_exit(buf, tab, out, Done, job, code, event) abort
+function! s:nvim_exit(buf, tab, out, err, Done, job, code, event) abort
   if bufexists(a:buf)
     execute 'bwipeout!' a:buf
   endif
   if a:tab <= tabpagenr('$')
     execute 'tabnext' a:tab
   endif
-  call s:finish(a:out, a:Done)
+  call s:finish(a:out, a:err, a:Done)
 endfunction
 
-function! s:finish(out, Done) abort
+function! s:finish(out, err, Done) abort
   let lines = filereadable(a:out) ? readfile(a:out) : []
+  let errors = filereadable(a:err) ? readfile(a:err) : []
   call delete(a:out)
+  call delete(a:err)
   silent! checktime
   call a:Done(lines)
+  if !empty(errors)
+    " Neovim redraws after the terminal tab closes, which would wipe them.
+    if has('nvim')
+      call timer_start(50, {-> s:warn(errors)})
+    else
+      call s:warn(errors)
+    endif
+  endif
+endfunction
+
+function! s:warn(lines) abort
+  redraw
+  echohl WarningMsg
+  for l in a:lines
+    echomsg l
+  endfor
+  echohl None
 endfunction
 
 " What an action printed: `PATH<tab>LINE` opens there; a link is put in the

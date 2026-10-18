@@ -273,7 +273,10 @@ on every start, so changes need no rebuild.
 - `insert-link` (the plugin's insert_link): pick a note, get `[[note]]`.
 - The swap guard also reads Vim's default swap beside the note
   (`.note.md.swp`); Vim's block 0 is the same as Neovim's.
-- Tried in `nvim --clean` through tmux: gf (id, duplicate names, missing
-  note), each line action, insert-link, a menu key, the menu, the digest.
-  Plain Vim is not installed here, so its `:!` path is untried.
+- Tried in `nvim --clean` and `vim -u NONE` (9.2) through tmux: gf (id,
+  heading, a directory, duplicate names, a missing note, no link), each
+  line action, insert-link, menu keys, the menu, the digest, and an action
+  that fails. ttykasten's stderr goes to a file and comes back as Vim
+  messages, since the terminal's copy is gone once Vim redraws (fzf draws
+  on /dev/tty, not stderr).
 
