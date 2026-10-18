@@ -301,16 +301,20 @@ impl App {
             "--delimiter=\t".to_string(),
             "--with-nth=3".into(),
             "--no-sort".into(),
-            "--expect=ctrl-x".into(),
-            format!("--header={}", self.msg.log_header),
+            format!(
+                "--header={}{}",
+                self.msg.log_header,
+                key_hint(self.msg.log_date_hint, &self.cfg.log.date_key)
+            ),
             format!("--prompt={}", self.msg.prompt_log),
         ];
+        args.extend(expect(&self.cfg.log.date_key));
         args.extend(preview);
         let args: Vec<&str> = args.iter().map(String::as_str).collect();
         let Some(out) = self.fzf(&lines, &args)? else {
             return Ok(());
         };
-        if out.first().map(String::as_str) == Some("ctrl-x") {
+        if pressed(&out, &self.cfg.log.date_key) {
             return self.open_date(now);
         }
         let Some((kind, t, _)) = out
@@ -358,7 +362,8 @@ impl App {
             "--scheme=path".to_string(),
             format!("--prompt={}", self.msg.prompt_find),
         ];
-        let index = if romaji::available(&self.cfg.romaji) {
+        let prefix = self.romaji_prefix()?;
+        let index = if prefix.is_some() && romaji::available(&self.cfg.romaji) {
             Some(self.write_find_index(&files)?)
         } else {
             None
@@ -366,10 +371,13 @@ impl App {
         if let Some(index) = &index {
             let exe = self.self_command()?;
             let idx = shell_quote(&index.to_string_lossy());
-            args.push(format!("--header={}", self.msg.romaji_hint));
+            let p = prefix.unwrap_or_default();
+            args.push(format!("--header={}", fill(self.msg.romaji_hint, &[&p, &p])));
             args.push("--bind=start:unbind(change)".into());
             args.push(format!("--bind=change:transform:{exe} find-change {idx} {{q}}"));
-            args.push("--bind=/:transform:[ -z {q} ] && echo 'rebind(change)+put(/)' || echo 'put(/)'".into());
+            args.push(format!(
+                "--bind={p}:transform:[ -z {{q}} ] && echo 'rebind(change)+put({p})' || echo 'put({p})'"
+            ));
         }
         args.extend(self.preview_arg("{}")?);
         let args: Vec<&str> = args.iter().map(String::as_str).collect();
@@ -431,7 +439,8 @@ impl App {
     fn find_change(&self, args: &[String]) -> Result<()> {
         let index = shell_quote(args.first().map_or("", String::as_str));
         let exe = self.self_command()?;
-        if args.get(1).is_some_and(|q| q.starts_with('/')) {
+        let prefix = self.romaji_prefix()?;
+        if prefix.is_some_and(|p| args.get(1).is_some_and(|q| q.starts_with(p))) {
             println!("disable-search+reload({exe} find-romaji {index} {{q}})");
         } else {
             println!("enable-search+unbind(change)+reload({exe} find-all {index})");
@@ -445,7 +454,10 @@ impl App {
     fn find_romaji(&self, args: &[String]) -> Result<()> {
         let text = fs::read_to_string(args.first().map_or("", String::as_str)).unwrap_or_default();
         let query = args.get(1).map_or("", String::as_str);
-        let query = query.strip_prefix('/').unwrap_or(query);
+        let query = self
+            .romaji_prefix()?
+            .and_then(|p| query.strip_prefix(p))
+            .unwrap_or(query);
         let re = romaji::regex(&self.cfg.romaji, query).and_then(|r| regex::Regex::new(&r).ok());
         let mut out = std::io::stdout().lock();
         for line in text.lines() {
@@ -479,8 +491,8 @@ impl App {
             format!("--bind=change:reload:{exe} grep-lines {{q}}"),
             "--preview-window=+{2}-/2".into(),
         ];
-        if self.cfg.romaji.enabled {
-            args.push(format!("--header={}", self.msg.romaji_hint));
+        if let Some(p) = self.romaji_prefix()?.filter(|_| self.cfg.romaji.enabled) {
+            args.push(format!("--header={}", fill(self.msg.romaji_hint, &[&p, &p])));
         }
         args.extend(self.preview_arg("{1} {2}")?);
         let args: Vec<&str> = args.iter().map(String::as_str).collect();
@@ -503,10 +515,11 @@ impl App {
     /// the plugin's grep does), as `rel\tline\trel:line: text`.
     fn grep_lines(&self, query: &str) -> Result<()> {
         let query = trim(query);
-        if query.is_empty() || query == "/" {
+        let prefix = self.romaji_prefix()?;
+        if query.is_empty() || Some(query) == prefix {
             return Ok(());
         }
-        let pattern = match query.strip_prefix('/') {
+        let pattern = match prefix.and_then(|p| query.strip_prefix(p)) {
             Some(r) => romaji::regex(&self.cfg.romaji, r).unwrap_or_else(|| regex::escape(r)),
             None => query.to_string(),
         };
@@ -1668,16 +1681,20 @@ impl App {
             "--delimiter=\t".to_string(),
             "--with-nth=2..".into(),
             "--no-sort".into(),
-            "--expect=ctrl-d".into(),
             format!("--prompt={}> ", range.label),
-            format!("--header={}", fill(self.msg.week_header, &[&range.from, &range.to])),
+            format!(
+                "--header={}{}",
+                fill(self.msg.week_header, &[&range.from, &range.to]),
+                key_hint(self.msg.week_digest_hint, &self.cfg.week.digest_key)
+            ),
         ];
+        args.extend(expect(&self.cfg.week.digest_key));
         args.extend(self.preview_arg("{1}")?);
         let args: Vec<&str> = args.iter().map(String::as_str).collect();
         let Some(out) = self.fzf(&items, &args)? else {
             return Ok(());
         };
-        if out.first().map(String::as_str) == Some("ctrl-d") {
+        if pressed(&out, &self.cfg.week.digest_key) {
             return self.digest(&range.from);
         }
         match out.get(1).and_then(|l| l.split('\t').next()) {
@@ -1877,6 +1894,18 @@ impl App {
         let message = fs::read_to_string(&p).unwrap_or_default();
         let _ = fs::remove_file(p);
         message.replace(['\n', '\r'], " ")
+    }
+
+    /// The character that starts a romaji query, None when it is "". One
+    /// character, since fzf binds it as a key and puts it back.
+    fn romaji_prefix(&self) -> Result<Option<&str>> {
+        let p = self.cfg.romaji.prefix.as_str();
+        let mut chars = p.chars();
+        match (chars.next(), chars.next()) {
+            (None, _) => Ok(None),
+            (Some(c), None) if !c.is_whitespace() && !",:+()'\"\\".contains(c) => Ok(Some(p)),
+            _ => bail!(fill(self.msg.bad_romaji_prefix, &[&p])),
+        }
     }
 
     /// This executable, quoted for a shell command line.
@@ -2393,6 +2422,25 @@ impl View {
             .map_or("", |(s, _)| s);
         View::decode(inbox, inside)
     }
+}
+
+/// A header's hint for a configured key; nothing when the key is "".
+fn key_hint(hint: &str, key: &str) -> String {
+    if key.is_empty() {
+        String::new()
+    } else {
+        fill(hint, &[&key])
+    }
+}
+
+/// fzf's `--expect` for a configured key; nothing when the key is "".
+fn expect(key: &str) -> Option<String> {
+    (!key.is_empty()).then(|| format!("--expect={key}"))
+}
+
+/// Whether fzf's output says `key` (given to `expect`) ended it.
+fn pressed(out: &[String], key: &str) -> bool {
+    !key.is_empty() && out.first().map(String::as_str) == Some(key)
 }
 
 /// Quotes a string for sh, for arguments fzf passes to a shell.

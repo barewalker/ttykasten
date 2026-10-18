@@ -48,15 +48,15 @@ cargo install --git https://github.com/barewalker/ttykasten
 | `tag` | pick lines (tab marks several) and turn them into tasks: `- [ ] … #todo` |
 | `mint-ids` | pick a note and give each tagged task in it a `^id` |
 | `undo` | undo the last task edit, even from an earlier run |
-| `week [WEEK]` | the notes dated in a week; `ctrl-d` shows its digest. `WEEK` is empty (this week), `-1`, `2026-W37` or a date |
+| `week [WEEK]` | the notes dated in a week; `ctrl-d` (`week.digest_key`) shows its digest. `WEEK` is empty (this week), `-1`, `2026-W37` or a date |
 | `digest [WEEK]` | the week digest: each note's outline and opening lines, the calendar, tasks finished and still open, extra sources, and what is coming up next week |
-| `find` | find a note by path and open it; a query starting with `/` is romaji, matched against paths and headings (`/kaigi` finds 会議) |
+| `find` | find a note by path and open it; a query starting with `/` (`romaji.prefix`) is romaji, matched against paths and headings (`/kaigi` finds 会議) |
 | `grep` | search note contents as you type; `/` for romaji here too |
 | `tags` | every `#tag` with its count; pick one to list the lines carrying it |
 | `recent` | notes by when they were last changed |
 | `new [TITLE]` | create a note from a template (picked from `templates/`) and open it |
 | `rename` | rename a note and rewrite every link to it in every note |
-| `log` | list recent daily and weekly notes; `ctrl-x` picks a date |
+| `log` | list recent daily and weekly notes; `ctrl-x` (`log.date_key`) picks a date |
 | `link` | pick a line of any note; give it a `^id` if it has none; copy `[[note#^id]]` |
 | `link-daily` | the same, and append `- [[note#^id]]` to today's daily note |
 | `links` | pick a note and see what it is linked with, a few steps deep (→ out, ← in, ↔ both) |

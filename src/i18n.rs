@@ -37,6 +37,7 @@ pub struct Msgs {
     pub prompt_inbox: &'static str,
     pub tasks_header: &'static str,
     pub log_header: &'static str,
+    pub log_date_hint: &'static str,
     pub unknown_action: &'static str,
     pub menu_item_empty: &'static str,
     pub no_file_name: &'static str,
@@ -91,6 +92,7 @@ pub struct Msgs {
     pub desc_week: &'static str,
     pub desc_digest: &'static str,
     pub week_header: &'static str,
+    pub week_digest_hint: &'static str,
     pub no_notes_in_week: &'static str,
     pub desc_grep: &'static str,
     pub desc_tags: &'static str,
@@ -101,6 +103,7 @@ pub struct Msgs {
     pub desc_dead_links: &'static str,
     pub desc_hubs: &'static str,
     pub romaji_hint: &'static str,
+    pub bad_romaji_prefix: &'static str,
     pub prompt_grep: &'static str,
     pub prompt_tag: &'static str,
     pub prompt_recent: &'static str,
@@ -135,7 +138,7 @@ Usage: ttykasten [ACTION] [ARG…]
   tag             pick lines (tab marks several) and turn them into tasks
   mint-ids        pick a note and give each tagged task in it an id
   undo            undo the last task edit (kept across runs)
-  week [WEEK]     notes dated in a week (ctrl-d: its digest); WEEK is -1, 2026-W37 or a date
+  week [WEEK]     notes dated in a week (week.digest_key: its digest); WEEK is -1, 2026-W37 or a date
   digest [WEEK]   the week digest: notes, calendar, finished and open tasks, what's due next
   grep            search note contents (a query starting with / is romaji)
   tags            pick a tag, then a line carrying it
@@ -147,7 +150,7 @@ Usage: ttykasten [ACTION] [ARG…]
   hubs            notes by how many links meet there
   find            find a note and open it
   new [TITLE]     create a note from the template
-  log             list daily and weekly notes (ctrl-x: pick a date)
+  log             list daily and weekly notes (log.date_key: pick a date)
   link            pick a line of any note; copy a link to it ([[note#^id]])
   link-daily      the same, and write the link into today's daily note
   backlinks       pick a line (or note) and list the lines linking to it
@@ -180,7 +183,8 @@ Config: $TTYKASTEN_CONFIG, else $XDG_CONFIG_HOME/ttykasten/config.toml.
     prompt_tasks: "tasks",
     prompt_inbox: "inbox",
     tasks_header: "enter: open / alt-s: sort (priority, due, added)",
-    log_header: "enter: open / ctrl-x: pick a date",
+    log_header: "enter: open",
+    log_date_hint: " / {}: pick a date",
     unknown_action: "unknown action: {}",
     menu_item_empty: "menu item has neither action nor command",
     no_file_name: "no usable file name in the title: {}",
@@ -232,9 +236,10 @@ Config: $TTYKASTEN_CONFIG, else $XDG_CONFIG_HOME/ttykasten/config.toml.
     desc_undo: "Undo the last task edit",
     prompt_note: "note> ",
     unsaved_in_nvim: "{} has unsaved changes in Neovim (pid {}); save it there first",
-    desc_week: "This week's notes (ctrl-d: digest)",
+    desc_week: "This week's notes and their digest",
     desc_digest: "Week digest",
-    week_header: "{} to {} · ctrl-d digest",
+    week_header: "{} to {}",
+    week_digest_hint: " · {} digest",
     no_notes_in_week: "no notes dated {} ({} to {})",
     desc_grep: "Search note contents (/ for romaji)",
     desc_tags: "Pick a tag, then a line carrying it",
@@ -244,7 +249,8 @@ Config: $TTYKASTEN_CONFIG, else $XDG_CONFIG_HOME/ttykasten/config.toml.
     desc_orphans: "Notes linked to nothing",
     desc_dead_links: "Links pointing at no note",
     desc_hubs: "Notes where links meet",
-    romaji_hint: "prefix / for romaji: /kaigi → 会議",
+    romaji_hint: "prefix {} for romaji: {}kaigi → 会議",
+    bad_romaji_prefix: "romaji.prefix must be one character other than a space and , : + ( ) ' \" \\ (got `{}`)",
     prompt_grep: "grep> ",
     prompt_tag: "tag> ",
     prompt_recent: "recent> ",
@@ -279,7 +285,7 @@ const JA: Msgs = Msgs {
   tag             行を選んで (tab で複数) タスクにする
   mint-ids        ノートを選び、タグの付いたタスクに id を付ける
   undo            直前のタスクの書き換えを戻す (起動をまたいで残る)
-  week [週]       その週の日付のノート (ctrl-d で週まとめ)。週は -1, 2026-W37, 日付
+  week [週]       その週の日付のノート (week.digest_key で週まとめ)。週は -1, 2026-W37, 日付
   digest [週]     週まとめ: ノート、予定、終えたタスクと残るタスク、翌週の期日
   grep            ノートの本文を探す (/ で始めるとローマ字)
   tags            タグを選び、そのタグの付いた行を探す
@@ -291,7 +297,7 @@ const JA: Msgs = Msgs {
   hubs            リンクの集まるノート
   find            ノートを探して開く
   new [題名]      雛形から新しいノートを作る
-  log             日誌と週まとめの一覧 (ctrl-x で日付を指定)
+  log             日誌と週まとめの一覧 (log.date_key で日付を指定)
   link            ノートの行を選び、その行へのリンク ([[note#^id]]) をコピーする
   link-daily      同じく、リンクを今日の日誌にも書く
   backlinks       行 (かノート) を選び、そこへリンクしている行を一覧する
@@ -324,7 +330,8 @@ const JA: Msgs = Msgs {
     prompt_tasks: "tasks",
     prompt_inbox: "inbox",
     tasks_header: "enter: 開く / alt-s: 並べ替え (優先度・期日・追加順)",
-    log_header: "enter: 開く / ctrl-x: 日付を指定",
+    log_header: "enter: 開く",
+    log_date_hint: " / {}: 日付を指定",
     unknown_action: "知らない操作: {}",
     menu_item_empty: "メニューの項目に action も command も無い",
     no_file_name: "題名からファイル名を作れない: {}",
@@ -376,9 +383,10 @@ const JA: Msgs = Msgs {
     desc_undo: "直前のタスクの書き換えを戻す",
     prompt_note: "note> ",
     unsaved_in_nvim: "{} は Neovim で未保存の変更がある (pid {})。先に Neovim で保存してほしい",
-    desc_week: "今週のノート (ctrl-d で週まとめ)",
+    desc_week: "今週のノートと週まとめ",
     desc_digest: "週まとめ",
-    week_header: "{} 〜 {} · ctrl-d 週まとめ",
+    week_header: "{} 〜 {}",
+    week_digest_hint: " · {} 週まとめ",
     no_notes_in_week: "{} ({} 〜 {}) の日付のノートは無い",
     desc_grep: "ノートの本文を探す (/ でローマ字)",
     desc_tags: "タグを選び、そのタグの付いた行を探す",
@@ -388,7 +396,8 @@ const JA: Msgs = Msgs {
     desc_orphans: "どこともつながっていないノート",
     desc_dead_links: "行き先のノートが無いリンク",
     desc_hubs: "リンクの集まるノート",
-    romaji_hint: "/ で始めるとローマ字: /kaigi → 会議",
+    romaji_hint: "{} で始めるとローマ字: {}kaigi → 会議",
+    bad_romaji_prefix: "romaji.prefix は空白と , : + ( ) ' \" \\ 以外の 1 文字にしてください (今は `{}`)",
     prompt_grep: "grep> ",
     prompt_tag: "tag> ",
     prompt_recent: "recent> ",

@@ -295,6 +295,8 @@ impl Default for BlockId {
 pub struct Log {
     pub day_label: String,
     pub week_label: String,
+    /// The key that asks for a date to open.
+    pub date_key: String,
 }
 
 impl Default for Log {
@@ -302,6 +304,7 @@ impl Default for Log {
         Log {
             day_label: "%Y-%m-%d (%a)".into(),
             week_label: "%G-W%V".into(),
+            date_key: "ctrl-x".into(),
         }
     }
 }
@@ -405,6 +408,8 @@ pub struct Romaji {
     pub timeout: u64,
     /// Match a note's headings as well as its path in `find`.
     pub headings: bool,
+    /// A query starting with this character is romaji. "" turns it off.
+    pub prefix: String,
 }
 
 impl Default for Romaji {
@@ -415,6 +420,7 @@ impl Default for Romaji {
             limit: None,
             timeout: 5000,
             headings: true,
+            prefix: "/".into(),
         }
     }
 }
@@ -546,6 +552,8 @@ pub struct Week {
     /// Regexes on a note's path relative to home (the plugin's are Lua
     /// patterns: `%.materials%.md$` here is `\.materials\.md$`).
     pub ignore_patterns: Vec<String>,
+    /// The key in `week` that opens the week's digest.
+    pub digest_key: String,
     pub digest: Digest,
 }
 
@@ -554,6 +562,7 @@ impl Default for Week {
         Week {
             ignore_dirs: vec!["templates".into()],
             ignore_patterns: Vec::new(),
+            digest_key: "ctrl-d".into(),
             digest: Digest::default(),
         }
     }

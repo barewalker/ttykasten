@@ -118,6 +118,7 @@ alias_max = 40          # cut the alias to this many characters; 0 = whole
 [log]
 day_label = "%Y-%m-%d (%a)"
 week_label = "%G-W%V"
+date_key = "ctrl-x"     # asks for a date to open ("" unbinds it)
 
 [fzf]
 command = "fzf"
@@ -133,6 +134,7 @@ command = "ttyskk"
 # limit = 100              # passed as --limit
 timeout = 5000             # milliseconds
 headings = true            # `find` matches headings as well as paths
+prefix = "/"               # starts a romaji query: one character; "" turns it off
 
 # `links`, `orphans`, `dead-links`, `hubs`.
 [graph]
@@ -166,6 +168,7 @@ unavailable = "calendar unavailable"
 ignore_dirs = ["templates"]
 # Regexes on the path relative to home (the plugin's are Lua patterns).
 ignore_patterns = []        # e.g. ['\.materials\.md$']
+digest_key = "ctrl-d"       # in `week`, opens the week's digest ("" unbinds it)
 [week.digest]
 lines = 8                   # body lines quoted per note
 tasks = true
