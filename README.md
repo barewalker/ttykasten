@@ -102,7 +102,8 @@ so that key bindings (tmux, herdr, shell aliases) can call actions directly.
 `contrib/ttykasten.vim` makes notes work in plain Vim (8.2 or newer) or
 Neovim with no plugin manager and without fzfkasten.nvim. Copy it to
 `~/.vim/plugin/` or `~/.config/nvim/plugin/`. It maps `<leader>` plus each
-menu key from your config (`<leader>kd` for `key = "kd"`), runs the action
+menu key from your config (`<leader>kd` for `key = "kd"`; a pause after
+`<leader>k` opens the menu, which lists them all), runs the action
 with fzf in the terminal (a terminal tab in Neovim) and opens what you
 picked. In markdown buffers, about the cursor's line: `gf` follows the
 `[[link]]` under the cursor (to the `^id` line or the heading it names),

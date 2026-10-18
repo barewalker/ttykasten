@@ -14,6 +14,8 @@
 " Keys (unless g:ttykasten_no_maps is set):
 "   <leader>KEY   every menu key in ttykasten's config (`ttykasten keys`),
 "                 e.g. <leader>kd for a menu item with key = "kd"
+"   <leader>k     alone (pause after it): the menu, with every key and what
+"                 it does (g:ttykasten_menu_map; "" leaves it unmapped)
 "   In markdown buffers, about the cursor's line (g:ttykasten_line_maps
 "   changes these; "" leaves one unmapped):
 "   gf            follow the [[link]] under the cursor (Vim's gf elsewhere)
@@ -24,8 +26,8 @@
 "   <leader>ki    insert a link to a note
 "
 " Settings: g:ttykasten_command (default "ttykasten"), g:ttykasten_no_maps,
-" g:ttykasten_line_maps. `set autoread` saves a prompt when a list wrote to
-" a note that is open but unchanged here.
+" g:ttykasten_line_maps, g:ttykasten_menu_map. `set autoread` saves a
+" prompt when a list wrote to a note that is open but unchanged here.
 
 if exists('g:loaded_ttykasten')
   finish
@@ -200,6 +202,14 @@ for s:key in s:keys
   execute 'nnoremap <silent> <leader>' . s:key . ' :call <SID>run(' . string(shellescape(s:key)) . ', function("<SID>open"))<CR>'
 endfor
 unlet! s:key s:keys
+
+" The menu, for a pause after the keys' common start (<leader>k): there is
+" no which-key here to show what follows, and the menu lists every key with
+" what it does. "" leaves it unmapped.
+let s:menu_map = get(g:, 'ttykasten_menu_map', '<leader>k')
+if s:menu_map !=# ''
+  execute 'nnoremap <silent> ' . s:menu_map . ' :call <SID>run("", function("<SID>open"))<CR>'
+endif
 
 let s:line_maps = extend({
       \ 'follow': 'gf',
