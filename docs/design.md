@@ -292,3 +292,16 @@ on every start, so changes need no rebuild.
   refuses; it never unlinks a note. gio does not trash files on internal
   mounts such as /tmp, so there the deletion fails and the note stays.
 
+2026-10-18 (late, later): a menu that waits for a key.
+
+- Typing `k` (the shell alias) and then `kd` in the menu was one `k` too
+  many. The menu now strips the start every key shares (`k`) and waits for
+  a key, like `<leader>k` in Neovim with which-key: `d` runs the item at
+  once. Search is off meanwhile, so the list keeps its order and each key
+  is `pos(N)+accept`; a search key (`menu.search_keys`, space and `/`)
+  unbinds them, clears the query and turns search on. `menu.hotkeys =
+  false` gives the old menu. Only one-character remainders are keys; a
+  longer one is reached by searching.
+- `menu.rest = true` lists the actions a hand-made menu leaves out after
+  its items.
+

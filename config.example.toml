@@ -229,6 +229,9 @@ mark = "7"              # the picked line in `link` and `backlinks`
 #
 # [menu]
 # rest = true   # after your items, every action they leave out
+# hotkeys = true                 # the menu waits for a key: `d` runs the item
+#                                # with key "kd" when every key starts with k
+# search_keys = ["space", "/"]   # switch from keys to typing to search
 #
 # [[menu.items]]
 # action = "daily"

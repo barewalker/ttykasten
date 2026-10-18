@@ -174,14 +174,23 @@ impl App {
 
     // ---- Actions ----
 
+    /// The menu. With `menu.hotkeys` it waits for a key, as `<leader>k`
+    /// does in Neovim: the part of an item's key after the start all keys
+    /// share runs it at once (`k` then `d`). `menu.search_keys` switch to
+    /// typing to search the labels.
     fn menu(&self) -> Result<()> {
         let items = self.cfg.menu.items();
-        let width = items
+        let keys: Vec<&str> = items
             .iter()
             .filter_map(|i| i.key.as_deref())
-            .map(|k| k.chars().count())
-            .max()
-            .unwrap_or(0);
+            .filter(|k| !k.is_empty())
+            .collect();
+        let shared = shared_start(&keys);
+        fn after<'a>(item: &'a MenuItem, shared: &str) -> &'a str {
+            item.key.as_deref().map_or("", |k| k.strip_prefix(shared).unwrap_or(k))
+        }
+        let shown = |item| after(item, shared);
+        let width = items.iter().map(|i| shown(i).chars().count()).max().unwrap_or(0);
         let lines: String = items
             .iter()
             .enumerate()
@@ -192,7 +201,7 @@ impl App {
                     .or_else(|| item.action.as_deref().and_then(|a| self.msg.action_desc(a)))
                     .or(item.command.as_deref())
                     .unwrap_or("");
-                let key = item.key.as_deref().unwrap_or("");
+                let key = shown(item);
                 if width == 0 {
                     format!("{n}\t{label}\n")
                 } else {
@@ -201,17 +210,54 @@ impl App {
                 }
             })
             .collect();
-        let Some(out) = self.fzf(
-            &lines,
-            &[
-                "--delimiter=\t",
-                "--with-nth=2..",
-                &format!("--prompt={}", self.msg.prompt_menu),
-                "--height=~40%",
-                "--layout=reverse",
-            ],
-        )?
-        else {
+        let menu = &self.cfg.menu;
+        let search: Vec<&str> = menu
+            .search_keys
+            .iter()
+            .map(String::as_str)
+            .filter(|k| !k.is_empty())
+            .collect();
+        // A key that is one character after the shared start, and one fzf
+        // can bind; the rest are reached by searching.
+        let hot: Vec<(usize, &str)> = if menu.hotkeys {
+            items
+                .iter()
+                .enumerate()
+                .map(|(n, i)| (n, shown(i)))
+                .filter(|(_, k)| k.chars().count() == 1 && !search.contains(k) && !" ,:+()'\"".contains(*k))
+                .collect()
+        } else {
+            Vec::new()
+        };
+        let mut args = vec![
+            "--delimiter=\t".to_string(),
+            "--with-nth=2..".into(),
+            format!("--prompt={}", self.msg.prompt_menu),
+            "--height=~40%".into(),
+            "--layout=reverse".into(),
+        ];
+        if !hot.is_empty() {
+            // Search stays off while keys run items, so the list keeps its
+            // order and pos(N) lands on item N.
+            let names: Vec<&str> = hot.iter().map(|(_, k)| *k).chain(search.iter().copied()).collect();
+            args.push("--disabled".into());
+            args.push(format!(
+                "--header={}",
+                fill(self.msg.menu_keys_hint, &[&search.join(self.msg.or)])
+            ));
+            for (n, k) in &hot {
+                args.push(format!("--bind={k}:pos({})+accept", n + 1));
+            }
+            for k in &search {
+                args.push(format!(
+                    "--bind={k}:unbind({})+clear-query+enable-search+change-prompt({})+change-header()",
+                    names.join(","),
+                    self.msg.prompt_menu_search
+                ));
+            }
+        }
+        let args: Vec<&str> = args.iter().map(String::as_str).collect();
+        let Some(out) = self.fzf(&lines, &args)? else {
             return Ok(());
         };
         let chosen = out
@@ -2744,6 +2790,18 @@ mod tests {
     }
 
     #[test]
+    fn keys_share_a_start() {
+        use super::shared_start;
+        assert_eq!(shared_start(&["kd", "kt", "kT", "k#"]), "k");
+        assert_eq!(shared_start(&["kd"]), "");
+        assert_eq!(shared_start(&[]), "");
+        assert_eq!(shared_start(&["kd", "x"]), "");
+        assert_eq!(shared_start(&["kd", "k"]), "");
+        assert_eq!(shared_start(&["gtd", "gtx"]), "gt");
+        assert_eq!(shared_start(&["日d", "日t"]), "日");
+    }
+
+    #[test]
     fn view_round_trip() {
         let v = View {
             inbox: false,
@@ -2866,6 +2924,30 @@ impl View {
             .map_or("", |(s, _)| s);
         View::decode(inbox, inside)
     }
+}
+
+/// The start every key shares, ending on a character boundary ("k" for kd,
+/// kt, kT); "" when there is one key or none, so a lone key stays whole.
+fn shared_start<'a>(keys: &[&'a str]) -> &'a str {
+    let Some((first, rest)) = keys.split_first() else {
+        return "";
+    };
+    if rest.is_empty() {
+        return "";
+    }
+    let mut end = first.len();
+    for k in rest {
+        end = first
+            .char_indices()
+            .zip(k.chars())
+            .find(|((_, a), b)| a != b)
+            .map_or(end.min(k.len().min(first.len())), |((i, _), _)| i.min(end));
+    }
+    // A key that is all shared start would have nothing left to press.
+    if keys.iter().any(|k| k.len() <= end) {
+        return "";
+    }
+    &first[..end]
 }
 
 /// A header's hint for a configured key; nothing when the key is "".

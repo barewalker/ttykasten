@@ -38,7 +38,7 @@ cargo install --git https://github.com/barewalker/ttykasten
 
 | Action | What it does |
 |---|---|
-| (none) | show the menu |
+| (none) | show the menu. It waits for a key: with menu keys `kd`, `kt`, …, press `d` and today's daily note opens, as `<leader>k` `d` does in Neovim. Space or `/` switches to typing to search the descriptions |
 | `daily` | open today's daily note, creating it from its template if missing |
 | `weekly` | open this week's weekly note (ISO week, `%G-W%V`) |
 | `capture [TEXT]` | append a task to the capture note |

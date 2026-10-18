@@ -348,7 +348,7 @@ impl Default for Fzf {
     }
 }
 
-#[derive(Debug, Default, Deserialize)]
+#[derive(Debug, Deserialize)]
 #[serde(default)]
 pub struct Menu {
     /// Items to list. Unset: every action in the default order.
@@ -356,6 +356,22 @@ pub struct Menu {
     /// After `items`, every action they leave out, in the default order, so
     /// an action added to ttykasten shows up without editing the config.
     pub rest: bool,
+    /// The menu waits for a key: an item's key, less the start every key
+    /// shares (`d` for `kd` when all keys start with `k`), runs it at once.
+    /// Typing to search starts after one of `search_keys`.
+    pub hotkeys: bool,
+    pub search_keys: Vec<String>,
+}
+
+impl Default for Menu {
+    fn default() -> Self {
+        Menu {
+            items: None,
+            rest: false,
+            hotkeys: true,
+            search_keys: vec!["space".into(), "/".into()],
+        }
+    }
 }
 
 #[derive(Debug, Clone, Deserialize)]
