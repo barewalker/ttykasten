@@ -1157,3 +1157,10 @@ The following have no file-level meaning:
 11. **Link-created notes were not sanitised**, so `[[a:b]]` would have
     created `a:b.md`. *Resolved 2026-09-30:* they are sanitised like new
     notes, and an empty result is refused (§4).
+12. **Numbers and fragments read as tags** (§10). Prose such as `check #2`
+    or a table cell `#3 same text` puts `#2` and `#3` in the tag listing, and
+    `http://x/#frag` adds `#frag`. Obsidian's rule would drop them: a tag is
+    not all digits, and `#` follows the line start or whitespace. The same
+    pattern finds task tags (`has_tag`, `require_tag`, the tag filter), so
+    both tools would have to change together, or their task lists would
+    differ. Change the pattern?
