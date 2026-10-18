@@ -57,6 +57,7 @@ cargo install --git https://github.com/barewalker/ttykasten
 | `recent` | notes by when they were last changed |
 | `new [TITLE]` | create a note from a template (picked from `templates/`) and open it |
 | `rename` | rename a note and rewrite every link to it in every note |
+| `note` | pick a note, then open it, list the lines linking to it, see what it is linked with, rename it, or delete it: after saying how many lines link to it and a typed `yes`, the note goes to the trash (`gio trash`, or `trash` on macOS; the `trash` setting) and is never unlinked |
 | `log` | list recent daily and weekly notes; `ctrl-x` (`log.date_key`) picks a date |
 | `link` | pick a line of any note; give it a `^id` if it has none; copy `[[note#^id]]` |
 | `link-daily` | the same, and append `- [[note#^id]]` to today's daily note |

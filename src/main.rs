@@ -135,6 +135,7 @@ impl App {
             "tags" => self.tags(),
             "recent" => self.recent(),
             "rename" => self.rename(),
+            "note" => self.note_panel(),
             "links" => self.links(),
             "orphans" => self.orphans(),
             "dead-links" => self.dead_links(),
@@ -808,11 +809,86 @@ impl App {
     /// every link to its old name in every note. Refuses before changing
     /// anything when a note involved has unsaved changes in Neovim.
     fn rename(&self) -> Result<()> {
-        let Some(rel) = self.pick_note(self.msg.prompt_find)? else {
+        match self.pick_note(self.msg.prompt_find)? {
+            Some(rel) => self.rename_note(&rel),
+            None => Ok(()),
+        }
+    }
+
+    /// NotePanel: pick a note, then what to do with it: open it, list what
+    /// links to it, see what it is linked with, rename it, or delete it.
+    fn note_panel(&self) -> Result<()> {
+        let Some(rel) = self.pick_note_path(self.msg.prompt_find)? else {
             return Ok(());
         };
-        let old_path = self.home.join(&rel);
-        let old_name = link::note_name(Path::new(&rel));
+        let m = self.msg;
+        let actions = [
+            ("open", m.note_open),
+            ("backlinks", m.note_backlinks),
+            ("links", m.note_links),
+            ("rename", m.note_rename),
+            ("delete", m.note_delete),
+        ];
+        let items: String = actions.iter().map(|(a, label)| format!("{a}\t{label}\n")).collect();
+        let prompt = format!("--prompt={rel}> ");
+        let Some(out) = self.fzf(&items, &["--delimiter=\t", "--with-nth=2", "--no-sort", &prompt])? else {
+            return Ok(());
+        };
+        match out.first().and_then(|l| l.split('\t').next()).unwrap_or("") {
+            "open" => self.edit(&self.home.join(&rel)),
+            "backlinks" => self.backlinks_to(&rel, None),
+            "links" => self.link_tree(&rel),
+            "rename" => self.rename_note(&rel),
+            "delete" => self.delete_note(&rel),
+            _ => Ok(()),
+        }
+    }
+
+    /// Sends a note to the trash, after saying how many lines link to it and
+    /// asking for "yes". Never unlinks the file: with no way to trash it,
+    /// it refuses.
+    fn delete_note(&self, rel: &str) -> Result<()> {
+        let path = self.home.join(rel);
+        self.guard(&path)?;
+        let Some(trash) = self.trash_command() else {
+            bail!(self.msg.no_trash);
+        };
+        let links = self.lines_linking_to(rel, None)?.len();
+        let prompt = fill(self.msg.confirm_delete, &[&rel, &links]);
+        if self.input(&prompt)?.as_deref().map(trim) != Some("yes") {
+            println!("{}", self.msg.delete_cancelled);
+            return Ok(());
+        }
+        let status = Command::new("sh")
+            .arg("-c")
+            .arg(format!("{trash} \"$@\""))
+            .arg("sh")
+            .arg(&path)
+            .current_dir(&self.home)
+            .status()
+            .with_context(|| fill(self.msg.cannot_start, &[&trash]))?;
+        if !status.success() || path.exists() {
+            bail!(fill(self.msg.failed, &[&trash, &status]));
+        }
+        println!("{}", fill(self.msg.deleted, &[&rel, &links]));
+        Ok(())
+    }
+
+    /// The command that moves a file to the trash: `trash` from the config,
+    /// else `gio trash`, else macOS's `trash`. None when there is none.
+    fn trash_command(&self) -> Option<String> {
+        if let Some(t) = self.cfg.trash.as_deref() {
+            return (!t.trim().is_empty()).then(|| t.to_string());
+        }
+        if ttykasten::command::on_path("gio") {
+            return Some("gio trash".into());
+        }
+        ttykasten::command::on_path("trash").then(|| "trash".to_string())
+    }
+
+    fn rename_note(&self, rel: &str) -> Result<()> {
+        let old_path = self.home.join(rel);
+        let old_name = link::note_name(Path::new(rel));
         let out = self.run_fzf(
             Stdio::null(),
             None,
@@ -926,13 +1002,17 @@ impl App {
     /// LinkTree: a picked note and what it is linked with, `graph.depth`
     /// links deep.
     fn links(&self) -> Result<()> {
-        let Some(rel) = self.pick_note(self.msg.prompt_find)? else {
-            return Ok(());
-        };
+        match self.pick_note(self.msg.prompt_find)? {
+            Some(rel) => self.link_tree(&rel),
+            None => Ok(()),
+        }
+    }
+
+    fn link_tree(&self, rel: &str) -> Result<()> {
         let g = self.graph()?;
-        let root = link::note_name(Path::new(&rel));
+        let root = link::note_name(Path::new(rel));
         let depth = self.cfg.graph.depth.max(1);
-        let mut rows = vec![(rel.clone(), 1, format!("● {root}"))];
+        let mut rows = vec![(rel.to_string(), 1, format!("● {root}"))];
         rows.extend(
             ttykasten::graph::tree(&g, &root, depth)
                 .into_iter()
@@ -2385,15 +2465,17 @@ impl App {
     /// when it has an id (`[[note#^id]]`, and `[[#^id]]` inside the note), or
     /// else to its note (§10, where the note's own lines are left out).
     fn backlinks(&self) -> Result<()> {
-        let Some((rel, _, listed)) = self.pick_line(self.msg.prompt_backlinks)? else {
-            return Ok(());
-        };
-        let name = link::note_name(Path::new(&rel));
-        let id = blockid::read(&listed).map(str::to_string);
-        let target = match &id {
-            Some(id) => format!("[[{name}#^{id}]]"),
-            None => format!("[[{name}]]"),
-        };
+        match self.pick_line(self.msg.prompt_backlinks)? {
+            Some((rel, _, listed)) => self.backlinks_to(&rel, blockid::read(&listed)),
+            None => Ok(()),
+        }
+    }
+
+    /// Every line linking to a note (its own lines left out), or to its line
+    /// `id` (`[[#^id]]` inside the note included), as (file, line number,
+    /// line).
+    fn lines_linking_to(&self, rel: &str, id: Option<&str>) -> Result<Vec<(String, String, String)>> {
+        let name = link::note_name(Path::new(rel));
         let glob = format!("*.{}", self.cfg.extension);
         let out = Command::new("rg")
             .args([
@@ -2409,7 +2491,7 @@ impl App {
             .with_context(|| fill(self.msg.cannot_start, &[&"rg"]))?;
         let text = String::from_utf8_lossy(&out.stdout);
         let ext = &self.cfg.extension;
-        let mut items = String::new();
+        let mut found = Vec::new();
         for record in text.lines() {
             let Some((file, rest)) = record.split_once('\0') else {
                 continue;
@@ -2418,10 +2500,24 @@ impl App {
                 continue;
             };
             let same = file == rel;
-            if (id.is_none() && same) || !link::links_to(line, ext, &name, id.as_deref(), same) {
+            if (id.is_none() && same) || !link::links_to(line, ext, &name, id, same) {
                 continue;
             }
-            let shown = trim(line).replace('\t', " ");
+            found.push((file.to_string(), lineno.to_string(), line.to_string()));
+        }
+        Ok(found)
+    }
+
+    /// The lines linking to a note, or to its line `id`, in fzf.
+    fn backlinks_to(&self, rel: &str, id: Option<&str>) -> Result<()> {
+        let name = link::note_name(Path::new(rel));
+        let target = match id {
+            Some(id) => format!("[[{name}#^{id}]]"),
+            None => format!("[[{name}]]"),
+        };
+        let mut items = String::new();
+        for (file, lineno, line) in self.lines_linking_to(rel, id)? {
+            let shown = trim(&line).replace('\t', " ");
             items.push_str(&format!("{file}\t{lineno}\t{file}:{lineno}: {shown}\n"));
         }
         if items.is_empty() {

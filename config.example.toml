@@ -41,6 +41,11 @@ editor_line = "+{line}"
 # "" turns the check off.
 # nvim_swap_dir = "~/.local/state/nvim/swap"
 
+# How `note` deletes a note: a command that moves its argument to the trash.
+# Unset: `gio trash`, else `trash` (macOS). "" leaves none, so deleting is
+# refused; ttykasten never unlinks a note itself.
+# trash = "gio trash"
+
 # The pager `digest` uses on a terminal (it gets coloured text). "" prints.
 pager = "less -R"
 
@@ -216,7 +221,7 @@ mark = "7"              # the picked line in `link` and `backlinks`
 # in the default order. Set: only the items written, in the order written.
 #   action   a ttykasten action: daily weekly capture tasks inbox
 #            capture-guided tag mint-ids undo week digest agenda find grep tags
-#            recent new rename log link link-daily backlinks links orphans
+#            recent new rename note log link link-daily insert-link backlinks links orphans
 #            dead-links hubs
 #   command  a shell command to run instead (sh -c, in home)
 #   key      a hint shown in the list; `ttykasten <key>` also runs the item

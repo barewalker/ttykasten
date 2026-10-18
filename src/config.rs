@@ -39,6 +39,10 @@ pub struct Config {
     /// default ($XDG_STATE_HOME/nvim/swap, else ~/.local/state/nvim/swap).
     /// Empty: no check.
     pub nvim_swap_dir: Option<String>,
+    /// The command that moves a deleted note to the trash; the file is the
+    /// argument. Unset: `gio trash`, else `trash`. "" leaves nothing to
+    /// delete with, so deleting is refused.
+    pub trash: Option<String>,
     /// Where a link goes: "osc52" (the terminal's clipboard, also over ssh and
     /// mosh), "none", or a command that reads the link on stdin (e.g. "wl-copy").
     pub clipboard: String,
@@ -73,6 +77,7 @@ impl Default for Config {
             editor: None,
             editor_line: "+{line}".into(),
             nvim_swap_dir: None,
+            trash: None,
             clipboard: "osc52".into(),
             notes: Notes::default(),
             follow_link: FollowLink::default(),
@@ -380,6 +385,7 @@ pub const ACTIONS: &[&str] = &[
     "tags",
     "recent",
     "rename",
+    "note",
     "links",
     "orphans",
     "dead-links",

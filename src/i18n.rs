@@ -92,6 +92,16 @@ pub struct Msgs {
     pub desc_week: &'static str,
     pub desc_agenda: &'static str,
     pub desc_insert_link: &'static str,
+    pub desc_note: &'static str,
+    pub note_open: &'static str,
+    pub note_backlinks: &'static str,
+    pub note_links: &'static str,
+    pub note_rename: &'static str,
+    pub note_delete: &'static str,
+    pub confirm_delete: &'static str,
+    pub delete_cancelled: &'static str,
+    pub deleted: &'static str,
+    pub no_trash: &'static str,
     pub prompt_insert_link: &'static str,
     pub no_such_note: &'static str,
     pub not_in_home: &'static str,
@@ -157,6 +167,7 @@ Usage: ttykasten [ACTION] [ARG…]
   tags            pick a tag, then a line carrying it
   recent          notes by when they were last changed
   rename          rename a note and rewrite every link to it
+  note            pick a note, then open, list its backlinks or links, rename or delete it (to the trash)
   links           pick a note and see what it is linked with, a few steps deep
   orphans         notes with no link in or out
   dead-links      links that no note answers to
@@ -254,6 +265,16 @@ Config: $TTYKASTEN_CONFIG, else $XDG_CONFIG_HOME/ttykasten/config.toml.
     desc_week: "This week's notes and their digest",
     desc_agenda: "This week's calendar",
     desc_insert_link: "Link to a note (copy [[note]])",
+    desc_note: "A note: open, backlinks, links, rename, delete",
+    note_open: "Open",
+    note_backlinks: "Lines linking to it",
+    note_links: "What it is linked with",
+    note_rename: "Rename (and rewrite the links to it)",
+    note_delete: "Delete (to the trash)",
+    confirm_delete: "delete {}? {} line(s) link to it; type yes> ",
+    delete_cancelled: "not deleted",
+    deleted: "{} is in the trash; {} line(s) now link to nothing",
+    no_trash: "no command to send the note to the trash (gio, trash); set `trash`",
     prompt_insert_link: "link to> ",
     no_such_note: "no note named {}",
     not_in_home: "{} is not under home ({})",
@@ -319,6 +340,7 @@ const JA: Msgs = Msgs {
   tags            タグを選び、そのタグの付いた行を探す
   recent          最近書き換えたノート
   rename          ノートの名前を変え、そこへのリンクをすべて直す
+  note            ノートを選び、開く・被リンク・つながり・名前変更・削除 (ゴミ箱へ) から選ぶ
   links           ノートを選び、リンクでつながるノートを数段たどる
   orphans         リンクの出入りが無いノート
   dead-links      行き先のノートが無いリンク
@@ -416,6 +438,16 @@ const JA: Msgs = Msgs {
     desc_week: "今週のノートと週まとめ",
     desc_agenda: "今週の予定",
     desc_insert_link: "ノートへのリンク ([[ノート]] をコピー)",
+    desc_note: "ノートを選んで操作: 開く、被リンク、つながり、名前変更、削除",
+    note_open: "開く",
+    note_backlinks: "ここへリンクしている行",
+    note_links: "つながっているノート",
+    note_rename: "名前を変える (リンクも書き換える)",
+    note_delete: "削除する (ゴミ箱へ)",
+    confirm_delete: "{} を削除しますか? {} 行がここへリンクしています。yes と入力> ",
+    delete_cancelled: "削除しませんでした",
+    deleted: "{} をゴミ箱に送りました。{} 行のリンクが行き先を失いました",
+    no_trash: "ゴミ箱に送るコマンド (gio、trash) がありません。`trash` を設定してください",
     prompt_insert_link: "link to> ",
     no_such_note: "{} という名前のノートはありません",
     not_in_home: "{} は home ({}) の中にありません",
@@ -490,6 +522,7 @@ impl Msgs {
             "digest" => self.desc_digest,
             "agenda" => self.desc_agenda,
             "insert-link" => self.desc_insert_link,
+            "note" => self.desc_note,
             "grep" => self.desc_grep,
             "tags" => self.desc_tags,
             "recent" => self.desc_recent,

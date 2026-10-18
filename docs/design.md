@@ -280,3 +280,15 @@ on every start, so changes need no rebuild.
   messages, since the terminal's copy is gone once Vim redraws (fzf draws
   on /dev/tty, not stderr).
 
+2026-10-18 (late): `note`, the plugin's note panel.
+
+- Pick a note, then: open, the lines linking to it, what it is linked
+  with, rename, delete. rename, links and backlinks were split into a
+  picker and an action on a given note, which the panel calls.
+- Delete differs from the plugin, which removes the file: ttykasten says
+  how many lines link to the note, asks for "yes", refuses while it has
+  unsaved changes in Vim or Neovim, and moves it to the trash (`gio trash`,
+  macOS's `trash`, or the `trash` setting). With no trash command it
+  refuses; it never unlinks a note. gio does not trash files on internal
+  mounts such as /tmp, so there the deletion fails and the note stays.
+
