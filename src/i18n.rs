@@ -90,6 +90,14 @@ pub struct Msgs {
     pub prompt_note: &'static str,
     pub unsaved_in_nvim: &'static str,
     pub desc_week: &'static str,
+    pub desc_agenda: &'static str,
+    pub agenda_today: &'static str,
+    pub agenda_header: &'static str,
+    pub agenda_open_hint: &'static str,
+    pub agenda_copy_hint: &'static str,
+    pub agenda_refresh_hint: &'static str,
+    pub agenda_empty: &'static str,
+    pub copied_events: &'static str,
     pub desc_digest: &'static str,
     pub week_header: &'static str,
     pub week_digest_hint: &'static str,
@@ -139,6 +147,7 @@ Usage: ttykasten [ACTION] [ARG…]
   mint-ids        pick a note and give each tagged task in it an id
   undo            undo the last task edit (kept across runs)
   week [WEEK]     notes dated in a week (week.digest_key: its digest); WEEK is -1, 2026-W37 or a date
+  agenda [WEEKS]  calendar events of a week, or of weeks like 0..1; enter opens that day's daily note
   digest [WEEK]   the week digest: notes, calendar, finished and open tasks, what's due next
   grep            search note contents (a query starting with / is romaji)
   tags            pick a tag, then a line carrying it
@@ -237,6 +246,14 @@ Config: $TTYKASTEN_CONFIG, else $XDG_CONFIG_HOME/ttykasten/config.toml.
     prompt_note: "note> ",
     unsaved_in_nvim: "{} has unsaved changes in Neovim (pid {}); save it there first",
     desc_week: "This week's notes and their digest",
+    desc_agenda: "This week's calendar",
+    agenda_today: "today",
+    agenda_header: "{} to {}{}",
+    agenda_open_hint: " · enter daily note",
+    agenda_copy_hint: " · {} copy",
+    agenda_refresh_hint: " · {} refetch",
+    agenda_empty: "nothing on the calendar {} ({} to {}){}",
+    copied_events: "copied {} line(s)",
     desc_digest: "Week digest",
     week_header: "{} to {}",
     week_digest_hint: " · {} digest",
@@ -286,6 +303,7 @@ const JA: Msgs = Msgs {
   mint-ids        ノートを選び、タグの付いたタスクに id を付ける
   undo            直前のタスクの書き換えを戻す (起動をまたいで残る)
   week [週]       その週の日付のノート (week.digest_key で週まとめ)。週は -1, 2026-W37, 日付
+  agenda [週]     その週の予定。0..1 のように複数週も可。enter でその日の日誌を開く
   digest [週]     週まとめ: ノート、予定、終えたタスクと残るタスク、翌週の期日
   grep            ノートの本文を探す (/ で始めるとローマ字)
   tags            タグを選び、そのタグの付いた行を探す
@@ -384,6 +402,14 @@ const JA: Msgs = Msgs {
     prompt_note: "note> ",
     unsaved_in_nvim: "{} は Neovim で未保存の変更がある (pid {})。先に Neovim で保存してほしい",
     desc_week: "今週のノートと週まとめ",
+    desc_agenda: "今週の予定",
+    agenda_today: "今日",
+    agenda_header: "{} 〜 {}{}",
+    agenda_open_hint: " · enter その日の日誌",
+    agenda_copy_hint: " · {} コピー",
+    agenda_refresh_hint: " · {} 取り直す",
+    agenda_empty: "{} の予定はありません ({} 〜 {}){}",
+    copied_events: "{} 行コピーしました",
     desc_digest: "週まとめ",
     week_header: "{} 〜 {}",
     week_digest_hint: " · {} 週まとめ",
@@ -446,6 +472,7 @@ impl Msgs {
             "undo" => self.desc_undo,
             "week" => self.desc_week,
             "digest" => self.desc_digest,
+            "agenda" => self.desc_agenda,
             "grep" => self.desc_grep,
             "tags" => self.desc_tags,
             "recent" => self.desc_recent,

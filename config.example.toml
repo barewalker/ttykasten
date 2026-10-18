@@ -146,8 +146,8 @@ ignore_dirs = ["templates"]
 limit = 50
 ignore_dirs = ["templates"]
 
-# The calendar, for {{agenda}} / {{agenda_week}} in templates and for the
-# week digest. Read through gcalcli (set up and authenticated outside
+# The calendar, for `agenda`, {{agenda}} / {{agenda_week}} in templates and
+# for the week digest. Read through gcalcli (set up and authenticated outside
 # ttykasten), or any command that prints the same TSV.
 [calendar]
 enabled = false
@@ -159,6 +159,9 @@ timeout = 15000             # milliseconds
 [calendar.cache]
 ttl = 900                   # seconds a result is reused
 # dir = "~/.cache/ttykasten/calendar"
+[calendar.keys]            # in `agenda` ("" unbinds one)
+copy = "alt-i"              # copy the picked events' lines (tab marks several)
+refresh = "ctrl-r"          # run the command again instead of reading the cache
 [calendar.labels]
 all_day = "all day"
 unavailable = "calendar unavailable"
@@ -207,7 +210,7 @@ mark = "7"              # the picked line in `link` and `backlinks`
 # The menu shown when ttykasten runs with no arguments. Unset: every action,
 # in the default order. Set: only the items written, in the order written.
 #   action   a ttykasten action: daily weekly capture tasks inbox
-#            capture-guided tag mint-ids undo week digest find grep tags
+#            capture-guided tag mint-ids undo week digest agenda find grep tags
 #            recent new rename log link link-daily backlinks links orphans
 #            dead-links hubs
 #   command  a shell command to run instead (sh -c, in home)

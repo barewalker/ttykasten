@@ -223,3 +223,17 @@ on every start, so changes need no rebuild.
 - Checked against the plugin's collect, group and entry_text on a real
   collection: 15 views (each filter, reverse, each grouping, combinations,
   the inbox) identical line for line.
+
+2026-10-18 (later): every key configurable, and the agenda.
+
+- The last fixed keys are settings: `log.date_key`, `week.digest_key` and
+  `romaji.prefix` (the plugin hard-codes these). "" unbinds a key; the
+  header leaves out the hint for an unbound one.
+- `agenda [WEEKS]` (the plugin's calendar.pick): the events of a week or a
+  span (`0..1`, `-1..0`), a line for today, past events dimmed. Enter opens
+  that day's daily note; `calendar.keys.copy` copies the picked events'
+  lines (the plugin's alt-i puts them into the buffer; a terminal has none);
+  `calendar.keys.refresh` runs the command again past the cache.
+- Checked against the plugin's span and rows with a fake gcalcli: three
+  specs, identical.
+

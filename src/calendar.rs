@@ -160,6 +160,11 @@ fn cache_key(argv: &[String]) -> String {
 /// Events from `from` up to `to` (exclusive): from a fresh cache, else from
 /// the command, else from an old cache marked stale.
 pub fn fetch(cal: &Calendar, from: &str, to: &str) -> Result<Fetched, String> {
+    fetch_again(cal, from, to, false)
+}
+
+/// `fetch`, or with `refresh` the command first, whatever the cache's age.
+pub fn fetch_again(cal: &Calendar, from: &str, to: &str, refresh: bool) -> Result<Fetched, String> {
     if !cal.enabled {
         return Err("calendar.enabled is false".into());
     }
@@ -178,7 +183,10 @@ pub fn fetch(cal: &Calendar, from: &str, to: &str) -> Result<Fetched, String> {
         let text = fs::read_to_string(file.as_ref()?).ok()?;
         parse_tsv(&text).ok().map(|events| Fetched { events, at, stale })
     };
-    if fresh && let Some(f) = cached(written.unwrap(), None) {
+    if fresh
+        && !refresh
+        && let Some(f) = cached(written.unwrap(), None)
+    {
         return Ok(f);
     }
     let why = match crate::command::run(&argv, Duration::from_millis(cal.timeout)) {
@@ -204,6 +212,64 @@ pub fn fetch(cal: &Calendar, from: &str, to: &str) -> Result<Fetched, String> {
         Some(f) => Ok(f),
         None => Err(why),
     }
+}
+
+/// One row of the agenda: an event, or the line that marks today.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Row {
+    Today,
+    Event(usize),
+}
+
+/// The agenda's rows (`rows`): each event as `MM-DD Ddd  ` and its line, in
+/// order, with a line for today before the first event from today on (or
+/// last, when every event is past). Each row says whether it is past.
+pub fn rows(cal: &Calendar, events: &[Event], today: &str, today_word: &str) -> Vec<(Row, String, bool)> {
+    let label = |d: &str| day(d).map_or_else(|| d.to_string(), |d| d.format("%m-%d %a").to_string());
+    let rule = (
+        Row::Today,
+        format!("{} {today_word} {} {}", "─".repeat(8), label(today), "─".repeat(24)),
+        false,
+    );
+    let mut out = Vec::new();
+    let mut drawn = false;
+    for (i, ev) in events.iter().enumerate() {
+        if !drawn && ev.date.as_str() >= today {
+            out.push(rule.clone());
+            drawn = true;
+        }
+        out.push((
+            Row::Event(i),
+            format!("{}  {}", label(&ev.date), format(cal, ev)),
+            ev.date.as_str() < today,
+        ));
+    }
+    if !drawn {
+        out.push(rule);
+    }
+    out
+}
+
+/// The weeks `spec` names, as one range: a week as `week::range` reads it,
+/// or two joined by `..` (`0..1` this week and next, `-1..0`, `..1`).
+pub fn span(spec: &str, today: NaiveDate) -> Result<crate::week::Range, String> {
+    let spec = crate::trim(spec);
+    let Some((first, second)) = spec.split_once("..") else {
+        return crate::week::range(spec, today);
+    };
+    let mut a = crate::week::range(first, today)?;
+    let mut b = crate::week::range(second, today)?;
+    if b.monday < a.monday {
+        std::mem::swap(&mut a, &mut b);
+    }
+    if a.label == b.label {
+        return Ok(a);
+    }
+    Ok(crate::week::Range {
+        label: format!("{}..{}", a.label, b.label),
+        to: b.to,
+        ..a
+    })
 }
 
 /// The events that cover `day`.
@@ -238,7 +304,8 @@ pub fn format(cal: &Calendar, ev: &Event) -> String {
     line
 }
 
-fn staleness(f: &Fetched) -> String {
+/// " (error; as of MM-DD HH:MM)" for a stale result, "" for a fresh one.
+pub fn staleness(f: &Fetched) -> String {
     match &f.stale {
         None => String::new(),
         Some(e) => {
@@ -350,5 +417,29 @@ bad\t\t\t\tskipped\t\t\n";
             day_lines(&cal, d),
             vec!["- (calendar unavailable: calendar.enabled is false)"]
         );
+    }
+
+    #[test]
+    fn agenda_rows_and_spans() {
+        let cal = Calendar::default();
+        let ev = parse_tsv(TSV).unwrap();
+        let rows = rows(&cal, &ev, "2026-10-06", "today");
+        let text: Vec<&str> = rows.iter().map(|(_, t, _)| t.as_str()).collect();
+        assert_eq!(text[3], "──────── today 10-06 Tue ────────────────────────");
+        assert_eq!(text[4], "10-07 Wed  all day  Holiday");
+        assert!(rows[0].2 && !rows[4].2);
+        assert_eq!(rows[3].0, Row::Today);
+        let all_past = super::rows(&cal, &ev, "2026-12-01", "today");
+        assert_eq!(all_past.last().unwrap().0, Row::Today);
+
+        let today = NaiveDate::from_ymd_opt(2026, 10, 7).unwrap();
+        let s = span("0..1", today).unwrap();
+        assert_eq!(
+            (s.label.as_str(), s.from.as_str(), s.to.as_str()),
+            ("2026-W41..2026-W42", "2026-10-05", "2026-10-18")
+        );
+        assert_eq!(span("1..0", today).unwrap().label, "2026-W41..2026-W42");
+        assert_eq!(span("0..0", today).unwrap().label, "2026-W41");
+        assert!(span("x..1", today).is_err());
     }
 }

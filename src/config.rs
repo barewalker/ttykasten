@@ -363,6 +363,7 @@ pub const ACTIONS: &[&str] = &[
     "undo",
     "week",
     "digest",
+    "agenda",
     "grep",
     "tags",
     "recent",
@@ -477,6 +478,7 @@ pub struct Calendar {
     pub timeout: u64,
     pub cache: CalendarCache,
     pub labels: CalendarLabels,
+    pub keys: CalendarKeys,
 }
 
 impl Default for Calendar {
@@ -490,6 +492,7 @@ impl Default for Calendar {
             timeout: 15000,
             cache: CalendarCache::default(),
             labels: CalendarLabels::default(),
+            keys: CalendarKeys::default(),
         }
     }
 }
@@ -525,6 +528,25 @@ pub struct CalendarCache {
 impl Default for CalendarCache {
     fn default() -> Self {
         CalendarCache { ttl: 900, dir: None }
+    }
+}
+
+/// Keys in `agenda` (fzf key names; "" unbinds one).
+#[derive(Debug, Deserialize)]
+#[serde(default)]
+pub struct CalendarKeys {
+    /// Copies the picked events' lines (tab marks several).
+    pub copy: String,
+    /// Runs the command again instead of reading the cache.
+    pub refresh: String,
+}
+
+impl Default for CalendarKeys {
+    fn default() -> Self {
+        CalendarKeys {
+            copy: "alt-i".into(),
+            refresh: "ctrl-r".into(),
+        }
     }
 }
 

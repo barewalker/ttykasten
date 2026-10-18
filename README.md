@@ -49,6 +49,7 @@ cargo install --git https://github.com/barewalker/ttykasten
 | `mint-ids` | pick a note and give each tagged task in it a `^id` |
 | `undo` | undo the last task edit, even from an earlier run |
 | `week [WEEK]` | the notes dated in a week; `ctrl-d` (`week.digest_key`) shows its digest. `WEEK` is empty (this week), `-1`, `2026-W37` or a date |
+| `agenda [WEEKS]` | the calendar's events of a week, or of weeks such as `0..1` (this week and next), with a line for today; enter opens that day's daily note, `alt-i` copies the picked events' lines, `ctrl-r` fetches again |
 | `digest [WEEK]` | the week digest: each note's outline and opening lines, the calendar, tasks finished and still open, extra sources, and what is coming up next week |
 | `find` | find a note by path and open it; a query starting with `/` (`romaji.prefix`) is romaji, matched against paths and headings (`/kaigi` finds 会議) |
 | `grep` | search note contents as you type; `/` for romaji here too |

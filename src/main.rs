@@ -114,6 +114,7 @@ impl App {
             }
             "week" => self.week(arg.as_deref().unwrap_or("")),
             "digest" => self.digest(arg.as_deref().unwrap_or("")),
+            "agenda" => self.agenda_list(arg.as_deref().unwrap_or("")),
             "grep" => self.grep(),
             "tags" => self.tags(),
             "recent" => self.recent(),
@@ -1700,6 +1701,109 @@ impl App {
         match out.get(1).and_then(|l| l.split('\t').next()) {
             Some(rel) if !rel.is_empty() => self.edit(&self.home.join(rel)),
             _ => Ok(()),
+        }
+    }
+
+    /// The calendar's events of a week or a span of weeks (`agenda`), one row
+    /// each, with a row for today. Enter opens the daily note of the row's
+    /// day; `calendar.keys.copy` copies the picked events' lines and
+    /// `calendar.keys.refresh` runs the command again.
+    fn agenda_list(&self, spec: &str) -> Result<()> {
+        let today = now().date();
+        let range = calendar::span(spec, today).map_err(|e| anyhow!(e))?;
+        let cal = &self.cfg.calendar;
+        let k = &cal.keys;
+        let mut refresh = false;
+        loop {
+            let until = (NaiveDate::parse_from_str(&range.to, "%Y-%m-%d")? + chrono::Duration::days(1))
+                .format("%Y-%m-%d")
+                .to_string();
+            let f = calendar::fetch_again(cal, &range.from, &until, refresh)
+                .map_err(|e| anyhow!("{}: {e}", cal.labels.unavailable))?;
+            let stale = calendar::staleness(&f);
+            if f.events.is_empty() {
+                eprintln!(
+                    "ttykasten: {}",
+                    fill(self.msg.agenda_empty, &[&range.label, &range.from, &range.to, &stale])
+                );
+                return Ok(());
+            }
+            let today_s = today.format("%Y-%m-%d").to_string();
+            let rows = calendar::rows(cal, &f.events, &today_s, self.msg.agenda_today);
+            let lines: String = rows
+                .iter()
+                .enumerate()
+                .map(|(i, (_, text, past))| {
+                    if *past {
+                        format!("{i}\t\x1b[2m{text}\x1b[0m\n")
+                    } else {
+                        format!("{i}\t{text}\n")
+                    }
+                })
+                .collect();
+            let header = format!(
+                "{}{}{}{}",
+                fill(self.msg.agenda_header, &[&range.from, &range.to, &stale]),
+                self.msg.agenda_open_hint,
+                key_hint(self.msg.agenda_copy_hint, &k.copy),
+                key_hint(self.msg.agenda_refresh_hint, &k.refresh)
+            );
+            let mut args = vec![
+                "--delimiter=\t".to_string(),
+                "--with-nth=2..".into(),
+                "--ansi".into(),
+                "--no-sort".into(),
+                "--multi".into(),
+                format!("--prompt={} agenda> ", range.label),
+                format!("--header={header}"),
+            ];
+            let keys: Vec<&str> = [k.copy.as_str(), k.refresh.as_str()]
+                .into_iter()
+                .filter(|k| !k.is_empty())
+                .collect();
+            if !keys.is_empty() {
+                args.push(format!("--expect={}", keys.join(",")));
+            }
+            let args: Vec<&str> = args.iter().map(String::as_str).collect();
+            let Some(out) = self.fzf(&lines, &args)? else {
+                return Ok(());
+            };
+            let (key, picked) = if keys.is_empty() {
+                ("", &out[..])
+            } else {
+                (out[0].as_str(), &out[1..])
+            };
+            let picked: Vec<&calendar::Row> = picked
+                .iter()
+                .filter_map(|l| l.split('\t').next()?.parse::<usize>().ok())
+                .filter_map(|i| rows.get(i).map(|(r, _, _)| r))
+                .collect();
+            if pressed(&out, &k.refresh) {
+                refresh = true;
+                continue;
+            }
+            if !key.is_empty() && key == k.copy {
+                let text: Vec<String> = picked
+                    .iter()
+                    .filter_map(|r| match r {
+                        calendar::Row::Event(i) => {
+                            Some(format!("{}{}", cal.bullet, calendar::format(cal, &f.events[*i])))
+                        }
+                        calendar::Row::Today => None,
+                    })
+                    .collect();
+                if !text.is_empty() {
+                    self.copy(&(text.join("\n") + "\n"));
+                    println!("{}", fill(self.msg.copied_events, &[&text.len()]));
+                }
+                return Ok(());
+            }
+            let date = match picked.first() {
+                Some(calendar::Row::Event(i)) => NaiveDate::parse_from_str(&f.events[*i].date, "%Y-%m-%d")?,
+                Some(calendar::Row::Today) => today,
+                None => return Ok(()),
+            };
+            return self.open_periodic(Periodic::Daily, date.and_time(now().time()));
         }
     }
 
