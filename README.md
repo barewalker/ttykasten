@@ -149,7 +149,11 @@ always = ["tasks/active.md"]   # the first entry is where `capture` writes
 [block_id]
 on_capture = true
 
-# The menu: items, order, key hints and labels are all yours.
+# The menu: items, order, key hints and labels are all yours. With
+# rest = true, the actions you leave out follow them.
+[menu]
+rest = true
+
 [[menu.items]]
 action = "daily"
 key = "kd"                 # `ttykasten kd` works too

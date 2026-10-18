@@ -227,6 +227,9 @@ mark = "7"              # the picked line in `link` and `backlinks`
 #   key      a hint shown in the list; `ttykasten <key>` also runs the item
 #   label    the description; unset uses the language's default
 #
+# [menu]
+# rest = true   # after your items, every action they leave out
+#
 # [[menu.items]]
 # action = "daily"
 # key = "kd"

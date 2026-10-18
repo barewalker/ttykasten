@@ -353,6 +353,9 @@ impl Default for Fzf {
 pub struct Menu {
     /// Items to list. Unset: every action in the default order.
     pub items: Option<Vec<MenuItem>>,
+    /// After `items`, every action they leave out, in the default order, so
+    /// an action added to ttykasten shows up without editing the config.
+    pub rest: bool,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -366,6 +369,18 @@ pub struct MenuItem {
     pub key: Option<String>,
     /// The description. Unset: the language's default.
     pub label: Option<String>,
+}
+
+impl MenuItem {
+    /// An item for an action, with no key and the default label.
+    pub fn of(action: &str) -> MenuItem {
+        MenuItem {
+            action: Some(action.to_string()),
+            command: None,
+            key: None,
+            label: None,
+        }
+    }
 }
 
 pub const ACTIONS: &[&str] = &[
@@ -402,16 +417,17 @@ pub const ACTIONS: &[&str] = &[
 impl Menu {
     pub fn items(&self) -> Vec<MenuItem> {
         match &self.items {
+            Some(items) if self.rest => {
+                let mut all = items.clone();
+                for a in ACTIONS {
+                    if !items.iter().any(|i| i.action.as_deref() == Some(*a)) {
+                        all.push(MenuItem::of(a));
+                    }
+                }
+                all
+            }
             Some(items) => items.clone(),
-            None => ACTIONS
-                .iter()
-                .map(|a| MenuItem {
-                    action: Some(a.to_string()),
-                    command: None,
-                    key: None,
-                    label: None,
-                })
-                .collect(),
+            None => ACTIONS.iter().map(|a| MenuItem::of(a)).collect(),
         }
     }
 }
@@ -880,5 +896,16 @@ mod tests {
         // A wrong value is still an error.
         assert!(parse("language = \"fr\"").is_err());
         assert!(parse("[block_id]\nlength = \"six\"").is_err());
+    }
+
+    #[test]
+    fn menu_rest_follows_the_items() {
+        let (cfg, _) = parse("[menu]\nrest = true\n[[menu.items]]\naction = \"tasks\"\nkey = \"kt\"\n").unwrap();
+        let items = cfg.menu.items();
+        assert_eq!(items[0].key.as_deref(), Some("kt"));
+        assert_eq!(items.len(), ACTIONS.len());
+        assert_eq!(items.iter().filter(|i| i.action.as_deref() == Some("tasks")).count(), 1);
+        let (cfg, _) = parse("[[menu.items]]\naction = \"tasks\"\n").unwrap();
+        assert_eq!(cfg.menu.items().len(), 1);
     }
 }
