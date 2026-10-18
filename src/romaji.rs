@@ -27,6 +27,12 @@ pub fn regex(cfg: &Romaji, query: &str) -> Option<String> {
     (!re.is_empty()).then(|| re.to_string())
 }
 
+/// Whether the backend is there to ask, without asking it (a query costs
+/// the dictionary's load time).
+pub fn installed(cfg: &Romaji) -> bool {
+    cfg.enabled && crate::command::on_path(&cfg.command)
+}
+
 /// Whether the backend answers at all.
 pub fn available(cfg: &Romaji) -> bool {
     regex(cfg, "a").is_some()

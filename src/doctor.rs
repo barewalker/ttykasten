@@ -13,6 +13,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
+use crate::command::on_path;
 use crate::config::{self, ACTIONS, Config};
 use crate::i18n::Language;
 use crate::tasks::Scanner;
@@ -530,14 +531,6 @@ fn check_romaji(d: &mut Doctor, cfg: &Config) {
 /// The first word of a command line, as a shell would run it.
 fn first_word(command: &str) -> Option<&str> {
     command.split_whitespace().next()
-}
-
-/// Whether `name` is a path to a file, or found on PATH.
-fn on_path(name: &str) -> bool {
-    if name.contains('/') {
-        return config::expand_tilde(name).is_ok_and(|p| p.is_file());
-    }
-    std::env::var_os("PATH").is_some_and(|paths| std::env::split_paths(&paths).any(|d| d.join(name).is_file()))
 }
 
 /// Notes under `dir`, .git and other dot-directories left out.

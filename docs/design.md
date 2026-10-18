@@ -251,4 +251,10 @@ on every start, so changes need no rebuild.
 - Exits 1 when it found an error. Its sentences are kept in the module in
   both languages rather than in the message tables, since nothing else
   uses them.
+- Romaji in the task list (the plugin's alt-/): as in `find`, a query
+  starting with `romaji.prefix` switches fzf's matching off and reloads the
+  list with the tasks whose text the romaji matches. The keys' reloads
+  carry the query, so the list stays narrowed after an action.
+- Tried in a real fzf, driven through tmux: the romaji query and back, the
+  tag chooser, every view key, done and undo.
 

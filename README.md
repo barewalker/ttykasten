@@ -79,7 +79,8 @@ the prompt spells out (`tasks [due, #budget, overdue, by tag]>`): `alt-s`
 sort, `alt-r` reverse, `alt-x` done and cancelled too, then only those,
 `alt-t` keep one tag's tasks, `alt-e` due filter (overdue, due by today, due
 this week, no due date), `alt-g` group by note, tag or due date. A step of a
-job counts as carrying the job's tags and due date. All keys are
+job counts as carrying the job's tags and due date. As in `find`, a query
+starting with `/` narrows the list by romaji (`/kaigi` finds 会議). All keys are
 configurable (`[tasks.keys]`). An action
 refuses when the line changed after the list was drawn, and every write is
 kept in an undo journal outside the collection.

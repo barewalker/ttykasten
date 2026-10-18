@@ -54,3 +54,12 @@ pub fn run(argv: &[String], timeout: Duration) -> Result<String, String> {
     }
     Ok(out)
 }
+
+/// Whether `name` is a path to a file, or found on PATH. Cheaper than
+/// running it, for deciding whether to offer something.
+pub fn on_path(name: &str) -> bool {
+    if name.contains('/') {
+        return crate::config::expand_tilde(name).is_ok_and(|p| p.is_file());
+    }
+    std::env::var_os("PATH").is_some_and(|paths| std::env::split_paths(&paths).any(|d| d.join(name).is_file()))
+}

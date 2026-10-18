@@ -80,6 +80,7 @@ fn run() -> Result<()> {
         "task-key" => return app.task_key(rest),
         "task-due" => return app.task_due(rest),
         "task-tag-filter" => return app.task_tag_filter(rest),
+        "task-search" => return app.task_search(rest),
         "task-capture" => {
             let message = app.capture_guided()?.unwrap_or_default();
             app.set_status(&message);
@@ -989,6 +990,15 @@ impl App {
                 .filter(|(key, _)| !key.is_empty())
                 .map(|(key, act)| format!("--bind={key}:{act}")),
         );
+        if let Some(p) = self.task_romaji_prefix()? {
+            // As in `find`: a query starting with the prefix switches fzf's
+            // matching off and has the list narrowed by romaji instead.
+            args.push("--bind=start:unbind(change)".into());
+            args.push(format!("--bind=change:transform:{exe} task-search {kind} {{q}}"));
+            args.push(format!(
+                "--bind={p}:transform:[ -z {{q}} ] && echo 'rebind(change)+put({p})' || echo 'put({p})'"
+            ));
+        }
         args.extend(self.preview_arg("{1} {2}")?);
         let args: Vec<&str> = args.iter().map(String::as_str).collect();
         let Some(out) = self.fzf(&lines, &args)? else {
@@ -1017,7 +1027,33 @@ impl App {
             &k.filter_due,
             &k.group,
         ];
-        fill(self.msg.tasks_keys, &keys)
+        let mut header = fill(self.msg.tasks_keys, &keys);
+        if let Ok(Some(p)) = self.task_romaji_prefix() {
+            header = format!("{header}\n{}", fill(self.msg.romaji_hint, &[&p, &p]));
+        }
+        header
+    }
+
+    /// The romaji prefix when the task list offers romaji narrowing.
+    fn task_romaji_prefix(&self) -> Result<Option<&str>> {
+        Ok(self.romaji_prefix()?.filter(|_| romaji::installed(&self.cfg.romaji)))
+    }
+
+    /// `task-search KIND QUERY`, run by fzf as the query changes while it
+    /// starts with the romaji prefix: the list narrowed by romaji, or fzf's
+    /// own matching back once the prefix is gone.
+    fn task_search(&self, args: &[String]) -> Result<()> {
+        let kind = args.first().map_or("tasks", String::as_str);
+        let view = View::from_prompt(kind == "inbox", &env::var("FZF_PROMPT").unwrap_or_default());
+        let exe = self.self_command()?;
+        let spec = shell_quote(&view.encode());
+        let query = args.get(1).map_or("", String::as_str);
+        if self.romaji_prefix()?.is_some_and(|p| query.starts_with(p)) {
+            println!("disable-search+reload({exe} task-lines {kind} {spec} {{q}})");
+        } else {
+            println!("enable-search+unbind(change)+reload({exe} task-lines {kind} {spec})");
+        }
+        Ok(())
     }
 
     /// The prompt carries the view, so the keys' commands can read it back
@@ -1080,8 +1116,20 @@ impl App {
     /// dimmed). fzf has no rows that are not entries, so in a grouped view
     /// the group's name leads each row, which also lets a query narrow to it.
     fn task_lines(&self, view: &View) -> Result<String> {
+        self.task_lines_matching(view, "")
+    }
+
+    /// `task_lines`, and when `query` starts with the romaji prefix, only the
+    /// tasks whose text the romaji after it matches (all of them when the
+    /// backend cannot answer, as `find` does).
+    fn task_lines_matching(&self, view: &View, query: &str) -> Result<String> {
         let scanner = self.scanner()?;
-        let (shown, texts) = self.view_tasks(&scanner, view)?;
+        let (mut shown, texts) = self.view_tasks(&scanner, view)?;
+        if let Some(rest) = self.romaji_prefix()?.and_then(|p| query.strip_prefix(p))
+            && let Some(re) = romaji::regex(&self.cfg.romaji, rest).and_then(|r| regex::Regex::new(&r).ok())
+        {
+            shown.retain(|t| re.is_match(&t.text));
+        }
         let row = |t: &tasks::Task, label: &str, orphaned: bool| {
             let raw = texts
                 .get(&t.rel)
@@ -1155,7 +1203,7 @@ impl App {
             args.first().map(String::as_str) == Some("inbox"),
             args.get(1).map_or("", String::as_str),
         );
-        let lines = self.task_lines(&view)?;
+        let lines = self.task_lines_matching(&view, args.get(2).map_or("", String::as_str))?;
         let _ = std::io::stdout().lock().write_all(lines.as_bytes());
         Ok(())
     }
@@ -1226,7 +1274,7 @@ impl App {
         // change-header takes the rest of the output, newlines included, so
         // it goes last.
         println!(
-            "change-prompt({})+reload({exe} task-lines {} {})+change-header:{header}",
+            "change-prompt({})+reload({exe} task-lines {} {} {{q}})+change-header:{header}",
             self.view_prompt(&view),
             view.kind(),
             shell_quote(&view.encode())
