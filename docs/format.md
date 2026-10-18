@@ -1122,10 +1122,13 @@ The following have no file-level meaning:
    example weekly template's title is `{{isoyear}}-W{{week}}`.
 2. **Locale.** `%A`, `%B` and `%a` follow the process's `LC_TIME`. The example
    configuration runs under `en_US.UTF-8`. Should ttykasten hard-code English, or follow the
-   locale?
+   locale? *Resolved 2026-09-30 (ttykasten side):* day and month names
+   written into notes are always English, whatever `language` says.
 3. **NewNote on an existing name.** The plugin replaces the buffer content of
    an existing file with the template (`core.lua:138`). This is lost only if
    saved. Should ttykasten refuse, open the existing file, or overwrite?
+   *Resolved 2026-09-30 (ttykasten side):* the existing note is opened as it
+   is, never overwritten from the template.
 4. **Buffer operations as file writes.** ttykasten's writes will normalise
    CRLF and BOMs (§0.4). The plugin's buffer operations would have preserved
    them. Is that acceptable?
