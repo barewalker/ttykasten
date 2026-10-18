@@ -100,7 +100,11 @@ due = "alt-l"           # set the due date; blank clears
 capture = "alt-a"       # capture with tags and a due date
 undo = "alt-u"
 sort = "alt-s"          # priority -> due -> added
-closed = "alt-x"        # also show done and cancelled tasks
+reverse = "alt-r"       # turn the order round (the steps of a job stay in order)
+closed = "alt-x"        # open -> done and cancelled too -> only those
+filter_tag = "alt-t"    # keep one tag's tasks (a step of a tagged job counts)
+filter_due = "alt-e"    # overdue -> due by today -> this week -> no due date -> off
+group = "alt-g"         # by note -> by tag -> by due date -> flat
 
 [block_id]
 length = 6

@@ -206,3 +206,20 @@ on every start, so changes need no rebuild.
   rename_note on a scratch collection; the real digests for three weeks are
   identical, ties included.
 
+2026-10-18: filtering and grouping the task list (the plugin's c1bbd09).
+
+- New keys in `tasks` and `inbox`: `alt-r` reverses the order (the steps of
+  a job stay in order), `alt-x` now cycles open -> closed too -> closed only,
+  `alt-t` keeps the tasks filed under one tag (chosen from the tags in view),
+  `alt-e` cycles the due filter (overdue -> due by today -> due this week ->
+  no due date -> off), `alt-g` groups by note, tag or due date.
+- A step takes its job's tags and due date. In a grouped view each row starts
+  with its group's name, since fzf has no rows that are not entries; a task
+  with two tags is in both groups.
+- Closed tasks are marked `✓` / `✗`, as the plugin now marks them.
+- The view lives in the prompt (`tasks [due, reversed, #budget, overdue]> `)
+  and is read back from $FZF_PROMPT. The tag chooser is a second fzf run
+  through `execute`, which leaves the tag for the refresh to apply.
+- Checked against the plugin's collect, group and entry_text on a real
+  collection: 15 views (each filter, reverse, each grouping, combinations,
+  the inbox) identical line for line.

@@ -182,7 +182,11 @@ pub struct TaskKeys {
     pub capture: String,
     pub undo: String,
     pub sort: String,
+    pub reverse: String,
     pub closed: String,
+    pub filter_tag: String,
+    pub filter_due: String,
+    pub group: String,
 }
 
 impl Default for TaskKeys {
@@ -195,7 +199,11 @@ impl Default for TaskKeys {
             capture: "alt-a".into(),
             undo: "alt-u".into(),
             sort: "alt-s".into(),
+            reverse: "alt-r".into(),
             closed: "alt-x".into(),
+            filter_tag: "alt-t".into(),
+            filter_due: "alt-e".into(),
+            group: "alt-g".into(),
         }
     }
 }

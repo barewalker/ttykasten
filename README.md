@@ -42,7 +42,7 @@ cargo install --git https://github.com/barewalker/ttykasten
 | `daily` | open today's daily note, creating it from its template if missing |
 | `weekly` | open this week's weekly note (ISO week, `%G-W%V`) |
 | `capture [TEXT]` | append a task to the capture note |
-| `tasks` | the task list: open tasks carrying `require_tag`, subtasks under their parent; `alt-s` sorts by priority, due date or when added; enter opens the task's line |
+| `tasks` | the task list: open tasks carrying `require_tag`, subtasks under their parent; sorted, filtered and grouped by keys (below); enter opens the task's line |
 | `inbox` | checkboxes without the tag, so nothing captured is lost |
 | `capture-guided` | capture a task, then pick tags from the collection and give a due date |
 | `tag` | pick lines (tab marks several) and turn them into tasks: `- [ ] … #todo` |
@@ -72,8 +72,13 @@ Leave out `TEXT` or `TITLE` to type it into an input line.
 In `tasks` and `inbox`, keys act on the task under the cursor and the list
 reloads in place: `ctrl-x` done/open, `ctrl-d` cancel/reopen, `ctrl-t` add
 the tag, `alt-l` due date (`fri`, `+3d`, `tomorrow`, `2026-10-02`; blank
-clears), `alt-a` capture, `alt-u` undo, `alt-s` sort, `alt-x` show done and
-cancelled tasks. All keys are configurable (`[tasks.keys]`). An action
+clears), `alt-a` capture, `alt-u` undo. Other keys change the view, which
+the prompt spells out (`tasks [due, #budget, overdue, by tag]>`): `alt-s`
+sort, `alt-r` reverse, `alt-x` done and cancelled too, then only those,
+`alt-t` keep one tag's tasks, `alt-e` due filter (overdue, due by today, due
+this week, no due date), `alt-g` group by note, tag or due date. A step of a
+job counts as carrying the job's tags and due date. All keys are
+configurable (`[tasks.keys]`). An action
 refuses when the line changed after the list was drawn, and every write is
 kept in an undo journal outside the collection.
 

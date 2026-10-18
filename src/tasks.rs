@@ -4,6 +4,7 @@
 //! reads the notes that contain a checkbox and rebuilds the list.
 
 use std::collections::HashMap;
+use std::sync::LazyLock;
 
 use regex::Regex;
 use unicode_width::UnicodeWidthStr;
@@ -33,10 +34,17 @@ pub struct Task {
     pub depth: usize,
     /// The task it is a subtask of, as an index into the scan.
     pub parent: Option<usize>,
+    /// The parent's line number (in the same note).
+    pub parent_line: Option<usize>,
     /// The text of the list item directly above it.
     pub context: Option<String>,
     pub children: usize,
     pub children_closed: usize,
+    /// The tags it is filed under: its own, then its parents', nearest first,
+    /// without `require_tag`, which every task carries (`tags_of`).
+    pub tags: Vec<String>,
+    /// Its due date, or that of the nearest task it is a step of.
+    pub due_in_effect: Option<String>,
     root_priority: Option<char>,
     root_due: Option<String>,
     root_lineno: usize,
@@ -55,8 +63,9 @@ pub struct Want {
     pub cancelled: bool,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Sort {
+    #[default]
     Priority,
     Due,
     Added,
@@ -68,6 +77,88 @@ impl Sort {
             "due" => Sort::Due,
             "added" => Sort::Added,
             _ => Sort::Priority,
+        }
+    }
+}
+
+/// A tag in a task's text (the plugin's `patterns.tag`).
+static TAG: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"#([A-Za-z0-9_-]+)").unwrap());
+
+/// Which tasks to show by state: open ones, closed ones too, or only those.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum State {
+    #[default]
+    Open,
+    All,
+    Closed,
+}
+
+/// Which tasks a due filter keeps. Each of the first three includes the one
+/// before it: what was due on Tuesday is still due by Friday.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DueFilter {
+    Overdue,
+    Today,
+    Week,
+    None,
+}
+
+/// Where a due date falls; disjoint, so each task is in one group.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Bucket {
+    Overdue,
+    Today,
+    Week,
+    Later,
+    None,
+}
+
+impl Bucket {
+    pub const ORDER: [Bucket; 5] = [Bucket::Overdue, Bucket::Today, Bucket::Week, Bucket::Later, Bucket::None];
+}
+
+/// What the list can be divided by.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Group {
+    Note,
+    Tag,
+    Due,
+}
+
+/// The view's filters. `today` and `week_end` (today + 7) are YYYY-MM-DD.
+#[derive(Debug, Clone, Default)]
+pub struct Filter {
+    pub state: State,
+    pub tag: Option<String>,
+    pub due: Option<DueFilter>,
+    pub today: String,
+    pub week_end: String,
+}
+
+/// Where `due` falls, by its day (a time is ignored).
+pub fn bucket(due: Option<&str>, today: &str, week_end: &str) -> Bucket {
+    let Some(due) = due else {
+        return Bucket::None;
+    };
+    let day = due.get(..10).unwrap_or(due);
+    if day < today {
+        Bucket::Overdue
+    } else if day == today {
+        Bucket::Today
+    } else if day <= week_end {
+        Bucket::Week
+    } else {
+        Bucket::Later
+    }
+}
+
+impl DueFilter {
+    fn keeps(self, b: Bucket) -> bool {
+        match self {
+            DueFilter::Overdue => b == Bucket::Overdue,
+            DueFilter::Today => matches!(b, Bucket::Overdue | Bucket::Today),
+            DueFilter::Week => matches!(b, Bucket::Overdue | Bucket::Today | Bucket::Week),
+            DueFilter::None => b == Bucket::None,
         }
     }
 }
@@ -186,6 +277,21 @@ impl<'a> Scanner<'a> {
             };
             let depth = parent.map_or(0, |p| p.depth);
             let context = parent.map(|p| p.text.clone());
+            let mut tags: Vec<String> = Vec::new();
+            for c in TAG.captures_iter(&parsed.text) {
+                let name = &c[1];
+                if Some(name) != t.require_tag.as_deref() && !tags.iter().any(|n| n == name) {
+                    tags.push(name.to_string());
+                }
+            }
+            if let Some(p) = parent_task {
+                for name in &all[p].tags {
+                    if !tags.contains(name) {
+                        tags.push(name.clone());
+                    }
+                }
+            }
+            let due_in_effect = parsed.due.clone().or_else(|| parent_task.and_then(|p| all[p].due_in_effect.clone()));
             if let Some(p) = parent_task {
                 all[p].children += 1;
                 if kind != Kind::Open {
@@ -214,9 +320,12 @@ impl<'a> Scanner<'a> {
                 date: date.clone(),
                 depth,
                 parent: parent_task,
+                parent_line: parent_task.map(|p| all[p].lineno),
                 context,
                 children: 0,
                 children_closed: 0,
+                tags,
+                due_in_effect,
                 root_priority,
                 root_due,
                 root_lineno,
@@ -334,10 +443,22 @@ impl<'a> Scanner<'a> {
         squeeze(&text)
     }
 
-    /// How a task reads on one line (`entry_text`).
+    /// How a task reads on one line (`entry_text`). A done or cancelled task
+    /// is marked `✓` or `✗`.
     pub fn entry_text(&self, task: &Task) -> String {
-        let nested = task.depth > 0 && task.parent.is_some() && !task.orphaned;
-        let lead = if nested { format!("{}↳ ", "  ".repeat(task.depth)) } else { String::new() };
+        self.entry_text_as(task, task.orphaned)
+    }
+
+    /// `entry_text` with `orphaned` decided by the caller: a grouped view
+    /// decides per group whether the parent is on a row above.
+    pub fn entry_text_as(&self, task: &Task, orphaned: bool) -> String {
+        let nested = task.depth > 0 && task.parent.is_some() && !orphaned;
+        let mut lead = if nested { format!("{}↳ ", "  ".repeat(task.depth)) } else { String::new() };
+        if task.done {
+            lead.push_str("✓ ");
+        } else if task.cancelled {
+            lead.push_str("✗ ");
+        }
         let prefix = task.priority.map(|p| format!("({p}) ")).unwrap_or_default();
         let progress = if task.children > 0 {
             format!("  [{}/{}]", task.children_closed, task.children)
@@ -380,22 +501,101 @@ pub fn line_hash(line: &str) -> String {
 }
 
 /// Picks the tasks wanted from a scan, marks orphans and sorts them.
-pub fn select(mut all: Vec<Task>, want: Want, sort: Sort) -> Vec<Task> {
+pub fn select(mut all: Vec<Task>, want: Want, filter: &Filter, sort: Sort, reverse: bool) -> Vec<Task> {
     let keep: Vec<bool> = all
         .iter()
         .map(|t| {
+            let closed = t.done || t.cancelled;
             !(t.aged_out && !t.tagged)
                 && t.tagged != want.inbox
-                && (want.done || !t.done)
-                && (want.cancelled || !t.cancelled)
+                && match filter.state {
+                    State::Open => (want.done || !t.done) && (want.cancelled || !t.cancelled),
+                    State::All => true,
+                    State::Closed => closed,
+                }
+                && filter.tag.as_ref().is_none_or(|tag| t.tags.contains(tag))
+                && filter.due.is_none_or(|d| {
+                    d.keeps(bucket(t.due_in_effect.as_deref(), &filter.today, &filter.week_end))
+                })
         })
         .collect();
     for t in all.iter_mut() {
         t.orphaned = t.parent.is_some_and(|p| !keep[p]);
     }
     let mut out: Vec<Task> = all.into_iter().zip(keep).filter(|(_, k)| *k).map(|(t, _)| t).collect();
-    out.sort_by(|a, b| sort_fields(a, sort).cmp(&sort_fields(b, sort)).then(a.lineno.cmp(&b.lineno)));
+    // Reversing turns the items round, not the steps of a job, which keep
+    // the order they are written in.
+    out.sort_by(|a, b| {
+        let by = sort_fields(a, sort).cmp(&sort_fields(b, sort));
+        if reverse { by.reverse() } else { by }.then(a.lineno.cmp(&b.lineno))
+    });
     out
+}
+
+/// Every tag the tasks are filed under, in the order they first come up.
+pub fn tags_in(list: &[Task]) -> Vec<String> {
+    let mut tags: Vec<String> = Vec::new();
+    for name in list.iter().flat_map(|t| &t.tags) {
+        if !tags.contains(name) {
+            tags.push(name.clone());
+        }
+    }
+    tags
+}
+
+/// What a group is made of.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum GroupKey {
+    Note(String),
+    Tag(String),
+    NoTag,
+    Due(Bucket),
+}
+
+/// One group: its key, and its tasks as (index into the list, orphaned).
+/// A step counts as orphaned when its parent is not in the same group.
+pub type Grouped = Vec<(GroupKey, Vec<(usize, bool)>)>;
+
+/// Divides an ordered list (`group`), keeping the order inside each group:
+/// by note in the order notes first come up; by tag likewise, a task under
+/// each of its tags and the untagged last; by due date in calendar order.
+pub fn group(list: &[Task], by: Group, today: &str, week_end: &str) -> Grouped {
+    let mut groups: Vec<(GroupKey, Vec<usize>)> = Vec::new();
+    let mut add = |key: GroupKey, i: usize| match groups.iter_mut().find(|(k, _)| *k == key) {
+        Some((_, v)) => v.push(i),
+        None => groups.push((key, vec![i])),
+    };
+    for (i, t) in list.iter().enumerate() {
+        match by {
+            Group::Note => add(GroupKey::Note(t.rel.clone()), i),
+            Group::Tag if t.tags.is_empty() => add(GroupKey::NoTag, i),
+            Group::Tag => t.tags.iter().for_each(|name| add(GroupKey::Tag(name.clone()), i)),
+            Group::Due => add(GroupKey::Due(bucket(t.due_in_effect.as_deref(), today, week_end)), i),
+        }
+    }
+    match by {
+        Group::Tag => groups.sort_by_key(|(k, _)| *k == GroupKey::NoTag),
+        Group::Due => groups.sort_by_key(|(k, _)| match k {
+            GroupKey::Due(b) => Bucket::ORDER.iter().position(|o| o == b),
+            _ => None,
+        }),
+        Group::Note => {}
+    }
+    groups
+        .into_iter()
+        .map(|(key, members)| {
+            let lines: Vec<(&str, usize)> = members.iter().map(|&i| (list[i].rel.as_str(), list[i].lineno)).collect();
+            let rows = members
+                .iter()
+                .map(|&i| {
+                    let t = &list[i];
+                    let parent_here = t.parent_line.is_some_and(|p| lines.contains(&(t.rel.as_str(), p)));
+                    (i, t.parent.is_some() && !parent_here)
+                })
+                .collect();
+            (key, rows)
+        })
+        .collect()
 }
 
 /// The keys a task sorts by, taken from its root task so a subtask stays
@@ -664,13 +864,13 @@ Paragraph at the margin.
         // An old note keeps its tagged tasks and loses its inbox items.
         let old = "- [ ] tagged #todo\n- [ ] untagged";
         let all = scan(&c, "lognote/2025-01-01.md", old, Some("2026-08-01"));
-        let tasks = select(all.clone(), Want::default(), Sort::Priority);
-        let inbox = select(all, Want { inbox: true, ..Want::default() }, Sort::Priority);
+        let tasks = select(all.clone(), Want::default(), &Filter::default(), Sort::Priority, false);
+        let inbox = select(all, Want { inbox: true, ..Want::default() }, &Filter::default(), Sort::Priority, false);
         assert_eq!(tasks.len(), 1);
         assert!(inbox.is_empty());
         // tasks/active.md never ages out.
         let all = scan(&c, "tasks/active.md", "---\ndate: 2025-01-01\n---\n- [ ] untagged", Some("2026-08-01"));
-        assert_eq!(select(all, Want { inbox: true, ..Want::default() }, Sort::Priority).len(), 1);
+        assert_eq!(select(all, Want { inbox: true, ..Want::default() }, &Filter::default(), Sort::Priority, false).len(), 1);
     }
 
     #[test]
@@ -690,7 +890,7 @@ Paragraph at the margin.
 - [ ] (A) first #todo due:2026-10-02
 - [ ] none #todo";
         let all = scan(&c, "n.md", text, None);
-        let sorted = select(all, Want::default(), Sort::Priority);
+        let sorted = select(all, Want::default(), &Filter::default(), Sort::Priority, false);
         let order: Vec<&str> = sorted.iter().map(|t| t.text.as_str()).collect();
         assert_eq!(order, vec!["first #todo due:2026-10-02", "second #todo", "step of second", "none #todo"]);
     }
@@ -706,7 +906,7 @@ Paragraph at the margin.
   - [x] child done:2026-09-01 10:00
   - [ ] other child";
         let all = scan(&c, "n.md", text, None);
-        let shown = select(all.clone(), Want::default(), Sort::Priority);
+        let shown = select(all.clone(), Want::default(), &Filter::default(), Sort::Priority, false);
         let e: Vec<String> = shown.iter().map(|t| s.entry_text(t)).collect();
         assert_eq!(
             e,
@@ -717,5 +917,52 @@ Paragraph at the margin.
             ]
         );
         assert_eq!(truncate("日本語のテキスト", 7), "日本語…");
+    }
+
+    #[test]
+    fn filters_reverse_and_groups() {
+        let c = cfg();
+        let text = "\
+- [ ] (A) job #todo #budget due:2026-10-10
+  - [ ] step one
+  - [x] step two done:2026-10-01 09:00
+- [ ] (B) later #todo due:2026-12-01
+- [ ] (C) plain #todo
+- [-] (A) dropped #todo #budget cancelled:2026-10-02";
+        let all = scan(&c, "n.md", text, None);
+        assert_eq!(all[1].tags, vec!["budget"]);
+        assert_eq!(all[1].due_in_effect.as_deref(), Some("2026-10-10"));
+        let f = |state, tag: Option<&str>, due| Filter {
+            state,
+            tag: tag.map(str::to_string),
+            due,
+            today: "2026-10-12".into(),
+            week_end: "2026-10-19".into(),
+        };
+        let texts = |v: Vec<Task>| v.into_iter().map(|t| t.lineno).collect::<Vec<_>>();
+        let pick = |filter: &Filter, reverse| texts(select(all.clone(), Want::default(), filter, Sort::Priority, reverse));
+        assert_eq!(pick(&f(State::Open, None, None), false), vec![1, 2, 4, 5]);
+        // Reversed: the items turn round, the job's steps stay in order.
+        assert_eq!(pick(&f(State::Open, None, None), true), vec![5, 4, 1, 2]);
+        assert_eq!(pick(&f(State::All, None, None), false), vec![1, 2, 3, 6, 4, 5]);
+        assert_eq!(pick(&f(State::Closed, None, None), false), vec![3, 6]);
+        assert_eq!(pick(&f(State::Open, Some("budget"), None), false), vec![1, 2]);
+        assert_eq!(pick(&f(State::Open, None, Some(DueFilter::Overdue)), false), vec![1, 2]);
+        assert_eq!(pick(&f(State::Open, None, Some(DueFilter::Week)), false), vec![1, 2]);
+        assert_eq!(pick(&f(State::Open, None, Some(DueFilter::None)), false), vec![5]);
+        // The closed-only view drops the open job, so its done step is orphaned.
+        let closed = select(all.clone(), Want::default(), &f(State::Closed, None, None), Sort::Priority, false);
+        assert!(closed[0].orphaned);
+
+        let shown = select(all.clone(), Want::default(), &f(State::Open, None, None), Sort::Priority, false);
+        let by_tag = group(&shown, Group::Tag, "2026-10-12", "2026-10-19");
+        let keys: Vec<&GroupKey> = by_tag.iter().map(|(k, _)| k).collect();
+        assert_eq!(keys, vec![&GroupKey::Tag("budget".into()), &GroupKey::NoTag]);
+        assert_eq!(by_tag[0].1, vec![(0, false), (1, false)]);
+        let by_due = group(&shown, Group::Due, "2026-10-12", "2026-10-19");
+        let keys: Vec<&GroupKey> = by_due.iter().map(|(k, _)| k).collect();
+        assert_eq!(keys, vec![&GroupKey::Due(Bucket::Overdue), &GroupKey::Due(Bucket::Later), &GroupKey::Due(Bucket::None)]);
+        assert_eq!(tags_in(&shown), vec!["budget"]);
+        assert_eq!(bucket(Some("2026-10-12T15:00"), "2026-10-12", "2026-10-19"), Bucket::Today);
     }
 }

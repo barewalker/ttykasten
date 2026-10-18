@@ -15,12 +15,13 @@ use std::time::SystemTime;
 
 use anyhow::{Context, Result, anyhow, bail};
 use chrono::{Local, NaiveDate, NaiveDateTime};
+use unicode_width::UnicodeWidthStr;
 
 use ttykasten::config::{self, Config, MenuItem};
 use ttykasten::i18n::{Msgs, fill};
 use ttykasten::note::{self, Periodic};
 use ttykasten::journal::{Entry, Journal, Undo};
-use ttykasten::tasks::{self, Scanner, Sort, Want};
+use ttykasten::tasks::{self, DueFilter, Group, Scanner, Sort, State, Want};
 use ttykasten::{blockid, calendar, fileio, link, nvimswap, preview, romaji, task, template, trim, week};
 
 fn main() -> ExitCode {
@@ -75,6 +76,7 @@ fn run() -> Result<()> {
         "grep-lines" => return app.grep_lines(rest.first().map_or("", String::as_str)),
         "task-key" => return app.task_key(rest),
         "task-due" => return app.task_due(rest),
+        "task-tag-filter" => return app.task_tag_filter(rest),
         "task-capture" => {
             let message = app.capture_guided()?.unwrap_or_default();
             app.set_status(&message);
@@ -827,22 +829,27 @@ impl App {
 
     /// The task list or the inbox in fzf (§8). Enter opens the note at the
     /// task's line; the keys in `tasks.keys` act on the task under the cursor
-    /// and reload the list.
+    /// or change the view, and reload the list.
     fn task_list(&self, inbox: bool) -> Result<()> {
-        let view = View { inbox, sort: Sort::parse(&self.cfg.tasks.sort), closed: false };
-        let lines = self.task_lines(view)?;
+        let view = View { inbox, sort: Sort::parse(&self.cfg.tasks.sort), ..View::default() };
+        let lines = self.task_lines(&view)?;
         let exe = self.self_command()?;
         let kind = view.kind();
         let k = &self.cfg.tasks.keys;
         let line = "{1} {2} {3}";
         let refresh = format!("transform:{exe} task-key refresh {kind}");
+        let view_key = |name: &str| format!("transform:{exe} task-key {name} {kind}");
         let binds = [
             (&k.done, format!("transform:{exe} task-key done {kind} {line}")),
             (&k.cancel, format!("transform:{exe} task-key cancel {kind} {line}")),
             (&k.tag, format!("transform:{exe} task-key tag {kind} {line}")),
-            (&k.undo, format!("transform:{exe} task-key undo {kind}")),
-            (&k.sort, format!("transform:{exe} task-key sort {kind}")),
-            (&k.closed, format!("transform:{exe} task-key closed {kind}")),
+            (&k.undo, view_key("undo")),
+            (&k.sort, view_key("sort")),
+            (&k.reverse, view_key("reverse")),
+            (&k.closed, view_key("closed")),
+            (&k.filter_due, view_key("due-filter")),
+            (&k.group, view_key("group")),
+            (&k.filter_tag, format!("execute({exe} task-tag-filter {kind})+{refresh}")),
             (&k.due, format!("execute({exe} task-due {line})+{refresh}")),
             (&k.capture, format!("execute({exe} task-capture)+{refresh}")),
         ];
@@ -851,7 +858,7 @@ impl App {
             "--with-nth=4..".into(),
             "--ansi".into(),
             "--no-sort".into(),
-            format!("--prompt={}", self.view_prompt(view)),
+            format!("--prompt={}", self.view_prompt(&view)),
             format!("--header={}", self.keys_header()),
             "--preview-window=+{2}-/2".into(),
         ];
@@ -870,29 +877,23 @@ impl App {
 
     fn keys_header(&self) -> String {
         let k = &self.cfg.tasks.keys;
-        let keys: [&dyn std::fmt::Display; 8] =
-            [&k.done, &k.cancel, &k.tag, &k.due, &k.capture, &k.undo, &k.sort, &k.closed];
+        let keys: [&dyn std::fmt::Display; 12] = [
+            &k.done, &k.cancel, &k.tag, &k.due, &k.capture, &k.undo, &k.sort, &k.reverse, &k.closed, &k.filter_tag,
+            &k.filter_due, &k.group,
+        ];
         fill(self.msg.tasks_keys, &keys)
     }
 
     /// The prompt carries the view, so the keys' commands can read it back
-    /// from $FZF_PROMPT: `tasks [due +closed]> `.
-    fn view_prompt(&self, view: View) -> String {
+    /// from $FZF_PROMPT: `tasks [due, reversed, #budget, overdue]> `.
+    fn view_prompt(&self, view: &View) -> String {
         let name = if view.inbox { self.msg.prompt_inbox } else { self.msg.prompt_tasks };
-        let by = match view.sort {
-            Sort::Priority => "priority",
-            Sort::Due => "due",
-            Sort::Added => "added",
-        };
-        let closed = if view.closed { " +closed" } else { "" };
-        format!("{name} [{by}{closed}]> ")
+        format!("{name} [{}]> ", view.encode())
     }
 
-    /// The list's lines for fzf: path, line number, the line's fingerprint,
-    /// and what is shown (the entry, then the note and line dimmed).
-    fn task_lines(&self, view: View) -> Result<String> {
-        let scanner = Scanner::new(&self.cfg)
-            .map_err(|e| anyhow!(fill(self.msg.bad_pattern, &[&"tasks.date_patterns / tasks.headings", &e])))?;
+    /// The scanned tasks (all of them, before any filter) and the notes'
+    /// lines, by path.
+    fn scan_tasks(&self, scanner: &Scanner) -> Result<Scanned> {
         let cutoff = self
             .cfg
             .tasks
@@ -906,27 +907,75 @@ impl App {
                 texts.insert(rel, lines);
             }
         }
-        let want = Want { inbox: view.inbox, done: view.closed, cancelled: view.closed };
-        let mut out = String::new();
-        for t in tasks::select(all, want, view.sort) {
+        Ok((all, texts))
+    }
+
+    fn scanner(&self) -> Result<Scanner<'_>> {
+        Scanner::new(&self.cfg)
+            .map_err(|e| anyhow!(fill(self.msg.bad_pattern, &[&"tasks.date_patterns / tasks.headings", &e])))
+    }
+
+    /// The tasks a view shows, in order.
+    fn view_tasks(&self, scanner: &Scanner, view: &View) -> Result<Scanned> {
+        let (all, texts) = self.scan_tasks(scanner)?;
+        let shown = tasks::select(all, Want { inbox: view.inbox, ..Want::default() }, &view.filter(), view.sort, view.reverse);
+        Ok((shown, texts))
+    }
+
+    /// The list's lines for fzf: path, line number, the line's fingerprint,
+    /// and what is shown (the group, the entry, then the note and line
+    /// dimmed). fzf has no rows that are not entries, so in a grouped view
+    /// the group's name leads each row, which also lets a query narrow to it.
+    fn task_lines(&self, view: &View) -> Result<String> {
+        let scanner = self.scanner()?;
+        let (shown, texts) = self.view_tasks(&scanner, view)?;
+        let row = |t: &tasks::Task, label: &str, orphaned: bool| {
             let raw = texts.get(&t.rel).and_then(|l| l.get(t.lineno - 1)).map_or("", String::as_str);
-            let state = match (view.closed, t.done, t.cancelled) {
-                (false, _, _) => "",
-                (true, true, _) => "[x] ",
-                (true, _, true) => "[-] ",
-                _ => "[ ] ",
-            };
-            out.push_str(&format!(
-                "{}\t{}\t{}\t{state}{}  \x1b[2m{}:{}\x1b[0m\n",
+            format!(
+                "{}\t{}\t{}\t{label}{}  \x1b[2m{}:{}\x1b[0m\n",
                 t.rel,
                 t.lineno,
                 tasks::line_hash(raw),
-                scanner.entry_text(&t),
+                scanner.entry_text_as(t, orphaned),
                 t.rel,
                 t.lineno
-            ));
+            )
+        };
+        let mut out = String::new();
+        let Some(by) = view.group else {
+            for t in &shown {
+                out.push_str(&row(t, "", t.orphaned));
+            }
+            return Ok(out);
+        };
+        let f = view.filter();
+        let groups = tasks::group(&shown, by, &f.today, &f.week_end);
+        let labels: Vec<String> = groups.iter().map(|(key, _)| self.group_label(key)).collect();
+        let width = labels.iter().map(|l| l.width()).max().unwrap_or(0);
+        for ((_, members), label) in groups.iter().zip(&labels) {
+            let label = format!("{label}{} │ ", " ".repeat(width - label.width()));
+            for &(i, orphaned) in members {
+                out.push_str(&row(&shown[i], &label, orphaned));
+            }
         }
         Ok(out)
+    }
+
+    fn group_label(&self, key: &tasks::GroupKey) -> String {
+        use tasks::{Bucket, GroupKey};
+        match key {
+            GroupKey::Note(rel) => rel.clone(),
+            GroupKey::Tag(name) => format!("#{name}"),
+            GroupKey::NoTag => self.msg.group_no_tag.to_string(),
+            GroupKey::Due(b) => match b {
+                Bucket::Overdue => self.msg.group_overdue,
+                Bucket::Today => self.msg.group_today,
+                Bucket::Week => self.msg.group_week,
+                Bucket::Later => self.msg.group_later,
+                Bucket::None => self.msg.group_no_due,
+            }
+            .to_string(),
+        }
     }
 
     /// Notes that contain a checkbox, as the plugin finds them: rg honours
@@ -943,14 +992,11 @@ impl App {
         Ok(text.lines().map(str::to_string).collect())
     }
 
-    /// `task-lines KIND SORT [closed]`, for fzf's reload.
+    /// `task-lines KIND VIEW`, for fzf's reload; VIEW is what the prompt
+    /// carries between the brackets.
     fn print_task_lines(&self, args: &[String]) -> Result<()> {
-        let view = View {
-            inbox: args.first().map(String::as_str) == Some("inbox"),
-            sort: Sort::parse(args.get(1).map_or("", String::as_str)),
-            closed: args.get(2).map(String::as_str) == Some("closed"),
-        };
-        let lines = self.task_lines(view)?;
+        let view = View::decode(args.first().map(String::as_str) == Some("inbox"), args.get(1).map_or("", String::as_str));
+        let lines = self.task_lines(&view)?;
         let _ = std::io::stdout().lock().write_all(lines.as_bytes());
         Ok(())
     }
@@ -970,21 +1016,47 @@ impl App {
                 };
                 String::new()
             }
-            "closed" => {
-                view.closed = !view.closed;
+            "reverse" => {
+                view.reverse = !view.reverse;
                 String::new()
             }
-            "refresh" => self.take_status(),
+            "closed" => {
+                view.state = match view.state {
+                    State::Open => State::All,
+                    State::All => State::Closed,
+                    State::Closed => State::Open,
+                };
+                String::new()
+            }
+            "due-filter" => {
+                view.due = match view.due {
+                    None => Some(DueFilter::Overdue),
+                    Some(DueFilter::Overdue) => Some(DueFilter::Today),
+                    Some(DueFilter::Today) => Some(DueFilter::Week),
+                    Some(DueFilter::Week) => Some(DueFilter::None),
+                    Some(DueFilter::None) => None,
+                };
+                String::new()
+            }
+            "group" => {
+                view.group = match view.group {
+                    None => Some(Group::Note),
+                    Some(Group::Note) => Some(Group::Tag),
+                    Some(Group::Tag) => Some(Group::Due),
+                    Some(Group::Due) => None,
+                };
+                String::new()
+            }
+            "refresh" => {
+                if let Some(tag) = self.take_tag_filter() {
+                    view.tag = (!tag.is_empty()).then_some(tag);
+                }
+                self.take_status()
+            }
             "undo" => self.undo_message()?,
             action => self.act_on_line(action, arg(2), arg(3), arg(4))?,
         };
         let exe = self.self_command()?;
-        let closed = if view.closed { " closed" } else { "" };
-        let sort = match view.sort {
-            Sort::Priority => "priority",
-            Sort::Due => "due",
-            Sort::Added => "added",
-        };
         let header = if message.is_empty() {
             self.keys_header()
         } else {
@@ -995,11 +1067,45 @@ impl App {
         // change-header takes the rest of the output, newlines included, so
         // it goes last.
         println!(
-            "change-prompt({})+reload({exe} task-lines {} {sort}{closed})+change-header:{header}",
-            self.view_prompt(view),
-            view.kind()
+            "change-prompt({})+reload({exe} task-lines {} {})+change-header:{header}",
+            self.view_prompt(&view),
+            view.kind(),
+            shell_quote(&view.encode())
         );
         Ok(())
+    }
+
+    /// `task-tag-filter KIND`, run by fzf's `execute`: picks one of the tags
+    /// the tasks in view are filed under (the view without its tag filter)
+    /// and leaves it for the list's refresh to apply; the first row clears
+    /// the filter. Esc leaves the view as it is.
+    fn task_tag_filter(&self, args: &[String]) -> Result<()> {
+        let mut view = View::from_prompt(args.first().map(String::as_str) == Some("inbox"), &env::var("FZF_PROMPT").unwrap_or_default());
+        view.tag = None;
+        let scanner = self.scanner()?;
+        let (shown, _) = self.view_tasks(&scanner, &view)?;
+        let mut rows = vec![self.msg.all_tags.to_string()];
+        rows.extend(tasks::tags_in(&shown).iter().map(|t| format!("#{t}")));
+        let prompt = format!("--prompt={}", self.msg.prompt_tag);
+        let Some(out) = self.fzf(&(rows.join("\n") + "\n"), &["--no-sort", &prompt])? else {
+            return Ok(());
+        };
+        let picked = out.first().map_or("", String::as_str);
+        let tag = if picked == self.msg.all_tags { "" } else { picked.trim_start_matches('#') };
+        if let Some(p) = self.status_path() {
+            if let Some(dir) = p.parent() {
+                let _ = fs::create_dir_all(dir);
+            }
+            let _ = fs::write(p.with_file_name("tag-filter"), tag);
+        }
+        Ok(())
+    }
+
+    fn take_tag_filter(&self) -> Option<String> {
+        let p = self.status_path()?.with_file_name("tag-filter");
+        let tag = fs::read_to_string(&p).ok()?;
+        let _ = fs::remove_file(p);
+        Some(tag.trim().to_string())
     }
 
     /// Done, cancel or tag on one listed line. Refuses when the line is no
@@ -1433,7 +1539,7 @@ impl App {
                     scanner.scan_note(&rel, &lines, None, &mut all);
                 }
             }
-            tasks::select(all, Want { inbox: false, done: true, cancelled: false }, Sort::Added)
+            tasks::select(all, Want { inbox: false, done: true, cancelled: false }, &tasks::Filter::default(), Sort::Added, false)
         } else {
             Vec::new()
         };
@@ -1933,7 +2039,7 @@ fn now() -> NaiveDateTime {
 
 #[cfg(test)]
 mod tests {
-    use super::base64;
+    use super::{DueFilter, Group, Sort, State, View, base64};
 
     #[test]
     fn base64_encodes() {
@@ -1943,20 +2049,115 @@ mod tests {
         assert_eq!(base64(b"foo"), "Zm9v");
         assert_eq!(base64("[[n#^a1]]".as_bytes()), "W1tuI15hMV1d");
     }
+
+    #[test]
+    fn view_round_trip() {
+        let v = View {
+            inbox: false,
+            sort: Sort::Due,
+            reverse: true,
+            state: State::Closed,
+            tag: Some("budget".into()),
+            due: Some(DueFilter::Week),
+            group: Some(Group::Tag),
+        };
+        assert_eq!(v.encode(), "due, reversed, #budget, due this week, closed only, by tag");
+        let back = View::from_prompt(false, &format!("tasks [{}]> ", v.encode()));
+        assert_eq!(back.encode(), v.encode());
+        assert_eq!(View::from_prompt(true, "inbox [priority]> ").encode(), "priority");
+    }
 }
 
-/// What the task list shows: tasks or the inbox, the order, and whether
-/// done and cancelled tasks are included.
-#[derive(Clone, Copy)]
+/// Tasks from a scan, and the notes' lines by path.
+type Scanned = (Vec<tasks::Task>, HashMap<String, Vec<String>>);
+
+/// The word for `v` in a table of view settings.
+fn word<T: PartialEq>(table: &[(T, &str)], v: T) -> Option<String> {
+    table.iter().find(|(x, _)| *x == v).map(|(_, w)| w.to_string())
+}
+
+/// The setting a word stands for.
+fn find<T: Copy>(table: &[(T, &str)], w: &str) -> Option<T> {
+    table.iter().find(|(_, x)| *x == w).map(|(v, _)| *v)
+}
+
+/// What the task list shows: tasks or the inbox, the order, and the
+/// filters and grouping.
+#[derive(Clone, Default)]
 struct View {
     inbox: bool,
     sort: Sort,
-    closed: bool,
+    reverse: bool,
+    state: State,
+    tag: Option<String>,
+    due: Option<DueFilter>,
+    group: Option<Group>,
 }
 
+const DUE_FILTERS: [(DueFilter, &str); 4] = [
+    (DueFilter::Overdue, "overdue"),
+    (DueFilter::Today, "due by today"),
+    (DueFilter::Week, "due this week"),
+    (DueFilter::None, "no due date"),
+];
+const STATES: [(State, &str); 2] = [(State::All, "closed too"), (State::Closed, "closed only")];
+const GROUPS: [(Group, &str); 3] = [(Group::Note, "by note"), (Group::Tag, "by tag"), (Group::Due, "by due")];
+
 impl View {
-    fn kind(self) -> &'static str {
+    fn kind(&self) -> &'static str {
         if self.inbox { "inbox" } else { "tasks" }
+    }
+
+    fn filter(&self) -> tasks::Filter {
+        let today = now().date();
+        tasks::Filter {
+            state: self.state,
+            tag: self.tag.clone(),
+            due: self.due,
+            today: today.format("%Y-%m-%d").to_string(),
+            week_end: (today + chrono::Duration::days(7)).format("%Y-%m-%d").to_string(),
+        }
+    }
+
+    /// The view in words, as the prompt shows it: the order first, then
+    /// whatever narrows or divides the list.
+    fn encode(&self) -> String {
+        let mut words = vec![match self.sort {
+            Sort::Priority => "priority",
+            Sort::Due => "due",
+            Sort::Added => "added",
+        }
+        .to_string()];
+        if self.reverse {
+            words.push("reversed".into());
+        }
+        if let Some(tag) = &self.tag {
+            words.push(format!("#{tag}"));
+        }
+        words.extend(self.due.and_then(|d| word(&DUE_FILTERS, d)));
+        words.extend(word(&STATES, self.state));
+        words.extend(self.group.and_then(|g| word(&GROUPS, g)));
+        words.join(", ")
+    }
+
+    fn decode(inbox: bool, s: &str) -> View {
+        let mut view = View { inbox, ..View::default() };
+        let mut words = s.split(", ");
+        view.sort = Sort::parse(words.next().unwrap_or(""));
+        for w in words {
+            if w == "reversed" {
+                view.reverse = true;
+            } else if let Some(tag) = w.strip_prefix('#') {
+                view.tag = Some(tag.to_string());
+            } else if let Some(d) = find(&DUE_FILTERS, w) {
+                view.due = Some(d);
+            } else if let Some(st) = find(&STATES, w) {
+                view.state = st;
+            } else if let Some(g) = find(&GROUPS, w) {
+                view.group = Some(g);
+            }
+        }
+        view
     }
 
     /// Reads the view back from a prompt made by `view_prompt`.
@@ -1965,9 +2166,7 @@ impl View {
             .rsplit_once('[')
             .and_then(|(_, r)| r.split_once(']'))
             .map_or("", |(s, _)| s);
-        let mut words = inside.split_whitespace();
-        let sort = Sort::parse(words.next().unwrap_or(""));
-        View { inbox, sort, closed: inside.contains("+closed") }
+        View::decode(inbox, inside)
     }
 }
 
