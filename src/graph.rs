@@ -32,7 +32,11 @@ pub struct Graph {
 /// A fence line (```` ``` ```` or `~~~` after up to three spaces); fences
 /// simply toggle here.
 fn is_fence(line: &str) -> bool {
-    let t = line.strip_prefix("   ").or_else(|| line.strip_prefix("  ")).or_else(|| line.strip_prefix(' ')).unwrap_or(line);
+    let t = line
+        .strip_prefix("   ")
+        .or_else(|| line.strip_prefix("  "))
+        .or_else(|| line.strip_prefix(' '))
+        .unwrap_or(line);
     let t = if line.starts_with("    ") { line } else { t };
     t.starts_with("```") || t.starts_with("~~~")
 }
@@ -75,7 +79,10 @@ fn without_code_spans(line: &str) -> String {
 pub fn build(notes: &[(String, Vec<String>)], extension: &str, ignore_dirs: &[String]) -> Graph {
     let mut g = Graph::default();
     for (rel, lines) in notes {
-        if ignore_dirs.iter().any(|d| rel == d || rel.strip_prefix(d.as_str()).is_some_and(|r| r.starts_with('/'))) {
+        if ignore_dirs
+            .iter()
+            .any(|d| rel == d || rel.strip_prefix(d.as_str()).is_some_and(|r| r.starts_with('/')))
+        {
             continue;
         }
         let name = link::note_name(std::path::Path::new(rel));
@@ -100,7 +107,13 @@ pub fn build(notes: &[(String, Vec<String>)], extension: &str, ignore_dirs: &[St
                 let target = link::split(inner, extension).name.to_string();
                 if !target.is_empty() && target != name && !linked.contains(&target) {
                     linked.push(target.clone());
-                    g.edges.push(Edge { from: name.clone(), to: target, rel: rel.clone(), lineno: i + 1, line: crate::trim(line).to_string() });
+                    g.edges.push(Edge {
+                        from: name.clone(),
+                        to: target,
+                        rel: rel.clone(),
+                        lineno: i + 1,
+                        line: crate::trim(line).to_string(),
+                    });
                 }
             }
         }
@@ -169,7 +182,13 @@ fn neighbours(g: &Graph, name: &str) -> Vec<Kid> {
         let e = &g.edges[i];
         match out_at.get(e.from.as_str()) {
             Some(&k) => kids[k].arrow = "↔",
-            None => kids.push(Kid { name: e.from.clone(), arrow: "←", rel: e.rel.clone(), lineno: e.lineno, missing: false }),
+            None => kids.push(Kid {
+                name: e.from.clone(),
+                arrow: "←",
+                rel: e.rel.clone(),
+                lineno: e.lineno,
+                missing: false,
+            }),
         }
     }
     kids
@@ -214,7 +233,12 @@ pub fn tree(g: &Graph, root: &str, depth: usize) -> Vec<Row> {
                     if kid.missing { "  (no note)" } else { "" }
                 ),
             });
-            render(kids_of, &kid.name, &format!("{prefix}{}", if last { "   " } else { "│  " }), rows);
+            render(
+                kids_of,
+                &kid.name,
+                &format!("{prefix}{}", if last { "   " } else { "│  " }),
+                rows,
+            );
         }
     }
     render(&kids_of, root, "", &mut rows);
@@ -259,7 +283,10 @@ mod tests {
     fn notes() -> Vec<(String, Vec<String>)> {
         let n = |rel: &str, text: &str| (rel.to_string(), text.lines().map(str::to_string).collect());
         vec![
-            n("alpha.md", "see [[beta]] and [[gamma]] and [[alpha]]\n`[[in code]]`\n```\n[[fenced]]\n```\n[[beta]] again"),
+            n(
+                "alpha.md",
+                "see [[beta]] and [[gamma]] and [[alpha]]\n`[[in code]]`\n```\n[[fenced]]\n```\n[[beta]] again",
+            ),
             n("beta.md", "back to [[alpha|A]]\n[[missing note]]"),
             n("gamma.md", "nothing"),
             n("lonely.md", "no links"),
@@ -271,8 +298,20 @@ mod tests {
     fn building() {
         let g = build(&notes(), "md", &["templates".into()]);
         assert_eq!(g.names, vec!["alpha", "beta", "gamma", "lonely"]);
-        let e: Vec<(&str, &str, usize)> = g.edges.iter().map(|e| (e.from.as_str(), e.to.as_str(), e.lineno)).collect();
-        assert_eq!(e, vec![("alpha", "beta", 1), ("alpha", "gamma", 1), ("beta", "alpha", 1), ("beta", "missing note", 2)]);
+        let e: Vec<(&str, &str, usize)> = g
+            .edges
+            .iter()
+            .map(|e| (e.from.as_str(), e.to.as_str(), e.lineno))
+            .collect();
+        assert_eq!(
+            e,
+            vec![
+                ("alpha", "beta", 1),
+                ("alpha", "gamma", 1),
+                ("beta", "alpha", 1),
+                ("beta", "missing note", 2)
+            ]
+        );
         assert_eq!(orphans(&g), vec!["lonely.md"]);
         assert_eq!(dead_links(&g).len(), 1);
         let h = hubs(&g);

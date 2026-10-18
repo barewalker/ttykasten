@@ -42,7 +42,10 @@ fn day(s: &str) -> Option<NaiveDate> {
 }
 
 fn shift(date: &str, days: i64) -> String {
-    day(date).map_or_else(|| date.to_string(), |d| (d + chrono::Duration::days(days)).format("%Y-%m-%d").to_string())
+    day(date).map_or_else(
+        || date.to_string(),
+        |d| (d + chrono::Duration::days(days)).format("%Y-%m-%d").to_string(),
+    )
 }
 
 /// Reads gcalcli's `agenda --tsv` output (`parse_tsv`).
@@ -60,7 +63,12 @@ pub fn parse_tsv(text: &str) -> Result<Vec<Event>, String> {
     let mut events = Vec::new();
     for line in lines.filter(|l| !l.is_empty()) {
         let fields: Vec<&str> = line.split('\t').collect();
-        let col = |name: &str| at(name).and_then(|i| fields.get(i)).filter(|v| !v.is_empty()).map(|v| v.to_string());
+        let col = |name: &str| {
+            at(name)
+                .and_then(|i| fields.get(i))
+                .filter(|v| !v.is_empty())
+                .map(|v| v.to_string())
+        };
         let Some(date) = col("start_date").filter(|d| crate::task::valid_due(d) && d.len() == 10) else {
             continue;
         };
@@ -106,12 +114,25 @@ fn sort(events: &mut [Event]) {
 /// configured `command` with `{from}` and `{to}`, or gcalcli's agenda.
 fn command(cal: &Calendar, from: &str, to: &str) -> Vec<String> {
     if let Some(cmd) = cal.command.as_deref().filter(|c| !c.is_empty()) {
-        return vec!["sh".into(), "-c".into(), cmd.replace("{from}", from).replace("{to}", to)];
+        return vec![
+            "sh".into(),
+            "-c".into(),
+            cmd.replace("{from}", from).replace("{to}", to),
+        ];
     }
-    let mut argv: Vec<String> = [cal.gcalcli.as_str(), "--nocolor", "agenda", "--tsv", "--details", "location", "--details", "id"]
-        .iter()
-        .map(|s| s.to_string())
-        .collect();
+    let mut argv: Vec<String> = [
+        cal.gcalcli.as_str(),
+        "--nocolor",
+        "agenda",
+        "--tsv",
+        "--details",
+        "location",
+        "--details",
+        "id",
+    ]
+    .iter()
+    .map(|s| s.to_string())
+    .collect();
     for name in cal.name.names() {
         argv.push("--calendar".into());
         argv.push(name.to_string());
@@ -143,8 +164,15 @@ pub fn fetch(cal: &Calendar, from: &str, to: &str) -> Result<Fetched, String> {
         return Err("calendar.enabled is false".into());
     }
     let argv = command(cal, from, to);
-    let file = cache_dir(cal).map(|d| d.join(format!("{}.tsv", cache_key(&[from.into(), to.into(), argv.join("\u{1f}")]))));
-    let written = file.as_ref().and_then(|f| fs::metadata(f).and_then(|m| m.modified()).ok());
+    let file = cache_dir(cal).map(|d| {
+        d.join(format!(
+            "{}.tsv",
+            cache_key(&[from.into(), to.into(), argv.join("\u{1f}")])
+        ))
+    });
+    let written = file
+        .as_ref()
+        .and_then(|f| fs::metadata(f).and_then(|m| m.modified()).ok());
     let fresh = written.is_some_and(|w| w.elapsed().is_ok_and(|age| age.as_secs() < cal.cache.ttl));
     let cached = |at: SystemTime, stale: Option<String>| {
         let text = fs::read_to_string(file.as_ref()?).ok()?;
@@ -162,7 +190,11 @@ pub fn fetch(cal: &Calendar, from: &str, to: &str) -> Result<Fetched, String> {
                     }
                     let _ = fs::write(f, &text);
                 }
-                return Ok(Fetched { events, at: SystemTime::now(), stale: None });
+                return Ok(Fetched {
+                    events,
+                    at: SystemTime::now(),
+                    stale: None,
+                });
             }
             Err(e) => e,
         },
@@ -176,7 +208,10 @@ pub fn fetch(cal: &Calendar, from: &str, to: &str) -> Result<Fetched, String> {
 
 /// The events that cover `day`.
 pub fn on_day<'a>(events: &'a [Event], day: &str) -> Vec<&'a Event> {
-    events.iter().filter(|e| e.date.as_str() <= day && day <= e.last.as_str()).collect()
+    events
+        .iter()
+        .filter(|e| e.date.as_str() <= day && day <= e.last.as_str())
+        .collect()
 }
 
 /// One event as a line: `HH:MM-HH:MM  title  @location`, `all day  title`, or
@@ -222,7 +257,10 @@ pub fn day_lines(cal: &Calendar, date: NaiveDate) -> Vec<String> {
         Ok(f) => f,
         Err(e) => return vec![format!("{b}({unavailable}: {e})")],
     };
-    let mut out: Vec<String> = on_day(&f.events, &d).iter().map(|e| format!("{b}{}", format(cal, e))).collect();
+    let mut out: Vec<String> = on_day(&f.events, &d)
+        .iter()
+        .map(|e| format!("{b}{}", format(cal, e)))
+        .collect();
     if f.stale.is_some() {
         out.push(format!("{b}({unavailable}{})", staleness(&f)));
     }
@@ -292,7 +330,15 @@ bad\t\t\t\tskipped\t\t\n";
         let cal = Calendar::default();
         let ev = parse_tsv(TSV).unwrap();
         let f: Vec<String> = ev.iter().map(|e| format(&cal, e)).collect();
-        assert_eq!(f, vec!["all day (10-05..10-07)  Trip", "09:00-09:30  Standup", "10:00-11:00  Review  @Room 3", "all day  Holiday"]);
+        assert_eq!(
+            f,
+            vec![
+                "all day (10-05..10-07)  Trip",
+                "09:00-09:30  Standup",
+                "10:00-11:00  Review  @Room 3",
+                "all day  Holiday"
+            ]
+        );
         assert_eq!(on_day(&ev, "2026-10-06").len(), 1);
     }
 
@@ -300,6 +346,9 @@ bad\t\t\t\tskipped\t\t\n";
     fn disabled_calendar() {
         let cal = Calendar::default();
         let d = NaiveDate::from_ymd_opt(2026, 10, 5).unwrap();
-        assert_eq!(day_lines(&cal, d), vec!["- (calendar unavailable: calendar.enabled is false)"]);
+        assert_eq!(
+            day_lines(&cal, d),
+            vec!["- (calendar unavailable: calendar.enabled is false)"]
+        );
     }
 }

@@ -85,7 +85,10 @@ mod tests {
         assert_eq!(sub("{{year}}-W{{week}}"), "2026-W40");
         assert_eq!(sub("{{title}}"), "T");
         let agenda = |k: &str| (k == "agenda").then(|| "- 09:00  standup".to_string());
-        assert_eq!(substitute("{{agenda}}|{{agenda_week}}", HDATE, "", t(), &agenda), "- 09:00  standup|{{agenda_week}}");
+        assert_eq!(
+            substitute("{{agenda}}|{{agenda_week}}", HDATE, "", t(), &agenda),
+            "- 09:00  standup|{{agenda_week}}"
+        );
     }
 
     #[test]
@@ -120,6 +123,9 @@ mod tests {
         assert_eq!(sub("{{{{title}}}}"), "{{{{title}}}}");
         assert_eq!(sub("{{title"), "{{title");
         // A % or {{ inside a value is inserted as is.
-        assert_eq!(substitute("{{title}}", HDATE, "%1 {{date}}", t(), &|_| None), "%1 {{date}}");
+        assert_eq!(
+            substitute("{{title}}", HDATE, "%1 {{date}}", t(), &|_| None),
+            "%1 {{date}}"
+        );
     }
 }

@@ -47,7 +47,12 @@ pub fn split<'a>(inner: &'a str, extension: &str) -> Link<'a> {
         .strip_suffix(extension)
         .and_then(|n| n.strip_suffix('.'))
         .unwrap_or(name);
-    Link { name, anchor, alias, dir }
+    Link {
+        name,
+        anchor,
+        alias,
+        dir,
+    }
 }
 
 /// A note's name: its basename without the last extension. A leading dot is
@@ -240,7 +245,12 @@ mod tests {
         let l = split("sub/deep/note.md#見出し|呼び名", "md");
         assert_eq!(
             l,
-            Link { name: "note", anchor: Some("見出し"), alias: Some("呼び名"), dir: Some("sub/deep") }
+            Link {
+                name: "note",
+                anchor: Some("見出し"),
+                alias: Some("呼び名"),
+                dir: Some("sub/deep")
+            }
         );
         assert_eq!(split("#top", "md").name, "");
         assert_eq!(split("note#Q#A", "md").anchor, Some("Q#A"));
@@ -252,7 +262,10 @@ mod tests {
     #[test]
     fn retargeting() {
         let r = |l| retarget_line(l, "md", "old note", "new");
-        assert_eq!(r("see [[old note]] and [[dir/old note.md#^a1b2c3|x]]").as_deref(), Some("see [[new]] and [[new#^a1b2c3|x]]"));
+        assert_eq!(
+            r("see [[old note]] and [[dir/old note.md#^a1b2c3|x]]").as_deref(),
+            Some("see [[new]] and [[new#^a1b2c3|x]]")
+        );
         assert_eq!(r("[[old notes]] [[other]]"), None);
         assert_eq!(r("[[old note#H#2|a|b]]").as_deref(), Some("[[new#H#2|a|b]]"));
     }
@@ -269,9 +282,27 @@ mod tests {
         assert!(links_to("see [[meeting]]", "md", "meeting", None, false));
         assert!(links_to("see [[dir/meeting.md#h|x]]", "md", "meeting", None, false));
         assert!(!links_to("see [[meetings]]", "md", "meeting", None, false));
-        assert!(links_to("- [[meeting#^a1b2c3]]", "md", "meeting", Some("a1b2c3"), false));
-        assert!(links_to("- [[meeting# ^a1b2c3 |x]]", "md", "meeting", Some("a1b2c3"), false));
-        assert!(!links_to("- [[meeting#^zzz999]]", "md", "meeting", Some("a1b2c3"), false));
+        assert!(links_to(
+            "- [[meeting#^a1b2c3]]",
+            "md",
+            "meeting",
+            Some("a1b2c3"),
+            false
+        ));
+        assert!(links_to(
+            "- [[meeting# ^a1b2c3 |x]]",
+            "md",
+            "meeting",
+            Some("a1b2c3"),
+            false
+        ));
+        assert!(!links_to(
+            "- [[meeting#^zzz999]]",
+            "md",
+            "meeting",
+            Some("a1b2c3"),
+            false
+        ));
         assert!(!links_to("- [[meeting]]", "md", "meeting", Some("a1b2c3"), false));
         assert!(links_to("- [[#^a1b2c3]]", "md", "meeting", Some("a1b2c3"), true));
         assert!(!links_to("- [[#^a1b2c3]]", "md", "meeting", Some("a1b2c3"), false));
@@ -297,7 +328,10 @@ mod tests {
         let l = lines(&["# T", "- [ ] draft ^t3k9aa", "", "plain line  "]);
         assert_eq!(
             block_link(&l, 1, "meeting", 6, ALPHA, None),
-            Some(BlockLink { link: "[[meeting#^t3k9aa]]".into(), new_line: None })
+            Some(BlockLink {
+                link: "[[meeting#^t3k9aa]]".into(),
+                new_line: None
+            })
         );
         assert_eq!(block_link(&l, 2, "meeting", 6, ALPHA, None), None);
         let made = block_link(&l, 3, "meeting", 6, ALPHA, None).unwrap();

@@ -254,9 +254,7 @@ impl Default for Tasks {
 impl Tasks {
     /// The capture note, relative to home.
     pub fn capture_target(&self) -> Option<&str> {
-        self.capture_note
-            .as_deref()
-            .or(self.always.first().map(String::as_str))
+        self.capture_note.as_deref().or(self.always.first().map(String::as_str))
     }
 }
 
@@ -411,7 +409,13 @@ pub struct Romaji {
 
 impl Default for Romaji {
     fn default() -> Self {
-        Romaji { enabled: true, command: "ttyskk".into(), limit: None, timeout: 5000, headings: true }
+        Romaji {
+            enabled: true,
+            command: "ttyskk".into(),
+            limit: None,
+            timeout: 5000,
+            headings: true,
+        }
     }
 }
 
@@ -426,7 +430,10 @@ pub struct Graph {
 
 impl Default for Graph {
     fn default() -> Self {
-        Graph { depth: 2, ignore_dirs: vec!["templates".into()] }
+        Graph {
+            depth: 2,
+            ignore_dirs: vec!["templates".into()],
+        }
     }
 }
 
@@ -440,7 +447,10 @@ pub struct Recent {
 
 impl Default for Recent {
     fn default() -> Self {
-        Recent { limit: 50, ignore_dirs: vec!["templates".into()] }
+        Recent {
+            limit: 50,
+            ignore_dirs: vec!["templates".into()],
+        }
     }
 }
 
@@ -521,7 +531,10 @@ pub struct CalendarLabels {
 
 impl Default for CalendarLabels {
     fn default() -> Self {
-        CalendarLabels { all_day: "all day".into(), unavailable: "calendar unavailable".into() }
+        CalendarLabels {
+            all_day: "all day".into(),
+            unavailable: "calendar unavailable".into(),
+        }
     }
 }
 
@@ -538,7 +551,11 @@ pub struct Week {
 
 impl Default for Week {
     fn default() -> Self {
-        Week { ignore_dirs: vec!["templates".into()], ignore_patterns: Vec::new(), digest: Digest::default() }
+        Week {
+            ignore_dirs: vec!["templates".into()],
+            ignore_patterns: Vec::new(),
+            digest: Digest::default(),
+        }
     }
 }
 
@@ -579,7 +596,10 @@ pub struct DigestMarks {
 
 impl Default for DigestMarks {
     fn default() -> Self {
-        DigestMarks { done: "✓".into(), open: "☐".into() }
+        DigestMarks {
+            done: "✓".into(),
+            open: "☐".into(),
+        }
     }
 }
 
@@ -686,7 +706,10 @@ pub fn load() -> Result<Config> {
     let (cfg, unknown) = parse(&text).with_context(|| format!("{}", path.display()))?;
     let msg = cfg.language.msgs();
     for key in unknown {
-        eprintln!("ttykasten: {}", crate::i18n::fill(msg.unknown_setting, &[&path.display(), &key]));
+        eprintln!(
+            "ttykasten: {}",
+            crate::i18n::fill(msg.unknown_setting, &[&path.display(), &key])
+        );
     }
     Ok(cfg)
 }

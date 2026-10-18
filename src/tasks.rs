@@ -114,7 +114,13 @@ pub enum Bucket {
 }
 
 impl Bucket {
-    pub const ORDER: [Bucket; 5] = [Bucket::Overdue, Bucket::Today, Bucket::Week, Bucket::Later, Bucket::None];
+    pub const ORDER: [Bucket; 5] = [
+        Bucket::Overdue,
+        Bucket::Today,
+        Bucket::Week,
+        Bucket::Later,
+        Bucket::None,
+    ];
 }
 
 /// What the list can be divided by.
@@ -183,7 +189,9 @@ impl<'a> Scanner<'a> {
         Ok(Scanner {
             cfg,
             due: Regex::new(r"due:([0-9]{4}-[0-9]{2}-[0-9]{2}[T0-9:]*)")?,
-            done_stamp: Regex::new(&format!(r"{WS}*done:([0-9]{{4}}-[0-9]{{2}}-[0-9]{{2}} [0-9]{{2}}:[0-9]{{2}})"))?,
+            done_stamp: Regex::new(&format!(
+                r"{WS}*done:([0-9]{{4}}-[0-9]{{2}}-[0-9]{{2}} [0-9]{{2}}:[0-9]{{2}})"
+            ))?,
             cancel_stamp: Regex::new(&format!(r"{WS}*cancelled:([0-9]{{4}}-[0-9]{{2}}-[0-9]{{2}})"))?,
             date: Regex::new(r"[0-9]{4}-[0-9]{2}-[0-9]{2}")?,
             date_patterns: compile(&cfg.tasks.date_patterns)?,
@@ -206,8 +214,8 @@ impl<'a> Scanner<'a> {
             .and_then(|k| fm.get(k.as_str()))
             .is_some_and(|v| matches!(*v, "false" | "no" | "off"));
         let date = self.note_date(rel, lines, &fm);
-        let aged_out = cutoff.is_some_and(|c| date.as_deref().is_some_and(|d| d < c))
-            && !t.always.iter().any(|a| a == rel);
+        let aged_out =
+            cutoff.is_some_and(|c| date.as_deref().is_some_and(|d| d < c)) && !t.always.iter().any(|a| a == rel);
         // With require_tag an old note can still hold tagged tasks, so only
         // its untagged checkboxes age out.
         if opted_out || (aged_out && t.require_tag.is_none()) {
@@ -291,7 +299,10 @@ impl<'a> Scanner<'a> {
                     }
                 }
             }
-            let due_in_effect = parsed.due.clone().or_else(|| parent_task.and_then(|p| all[p].due_in_effect.clone()));
+            let due_in_effect = parsed
+                .due
+                .clone()
+                .or_else(|| parent_task.and_then(|p| all[p].due_in_effect.clone()));
             if let Some(p) = parent_task {
                 all[p].children += 1;
                 if kind != Kind::Open {
@@ -453,7 +464,11 @@ impl<'a> Scanner<'a> {
     /// decides per group whether the parent is on a row above.
     pub fn entry_text_as(&self, task: &Task, orphaned: bool) -> String {
         let nested = task.depth > 0 && task.parent.is_some() && !orphaned;
-        let mut lead = if nested { format!("{}↳ ", "  ".repeat(task.depth)) } else { String::new() };
+        let mut lead = if nested {
+            format!("{}↳ ", "  ".repeat(task.depth))
+        } else {
+            String::new()
+        };
         if task.done {
             lead.push_str("✓ ");
         } else if task.cancelled {
@@ -470,7 +485,10 @@ impl<'a> Scanner<'a> {
             (Some(c), false) => format!("  ← {}", truncate(&self.display_text(c), 40)),
             _ => String::new(),
         };
-        format!("{lead}{prefix}{}{progress}{due}{context}", self.display_text(&task.text))
+        format!(
+            "{lead}{prefix}{}{progress}{due}{context}",
+            self.display_text(&task.text)
+        )
     }
 }
 
@@ -514,9 +532,9 @@ pub fn select(mut all: Vec<Task>, want: Want, filter: &Filter, sort: Sort, rever
                     State::Closed => closed,
                 }
                 && filter.tag.as_ref().is_none_or(|tag| t.tags.contains(tag))
-                && filter.due.is_none_or(|d| {
-                    d.keeps(bucket(t.due_in_effect.as_deref(), &filter.today, &filter.week_end))
-                })
+                && filter
+                    .due
+                    .is_none_or(|d| d.keeps(bucket(t.due_in_effect.as_deref(), &filter.today, &filter.week_end)))
         })
         .collect();
     for t in all.iter_mut() {
@@ -584,7 +602,10 @@ pub fn group(list: &[Task], by: Group, today: &str, week_end: &str) -> Grouped {
     groups
         .into_iter()
         .map(|(key, members)| {
-            let lines: Vec<(&str, usize)> = members.iter().map(|&i| (list[i].rel.as_str(), list[i].lineno)).collect();
+            let lines: Vec<(&str, usize)> = members
+                .iter()
+                .map(|&i| (list[i].rel.as_str(), list[i].lineno))
+                .collect();
             let rows = members
                 .iter()
                 .map(|&i| {
@@ -643,7 +664,9 @@ fn in_dirs(rel: &str, dirs: &[String]) -> bool {
 }
 
 fn fence_delim(line: &str) -> Option<(u8, usize)> {
-    let t = line.trim_start_matches(|c: char| c.is_ascii() && is_ws(c as u8)).as_bytes();
+    let t = line
+        .trim_start_matches(|c: char| c.is_ascii() && is_ws(c as u8))
+        .as_bytes();
     let ch = *t.first().filter(|&&c| c == b'`' || c == b'~')?;
     let len = t.iter().take_while(|&&c| c == ch).count();
     (len >= 3).then_some((ch, len))
@@ -799,7 +822,12 @@ mod tests {
     #[test]
     fn grammar_edges() {
         let c = cfg();
-        let all = scan(&c, "n.md", "- [ ]\n- [ ]  \n+ [ ] plus\n1. [ ] num\n- [>] arrow\n* [x] star done:2026-07-17 10:00", None);
+        let all = scan(
+            &c,
+            "n.md",
+            "- [ ]\n- [ ]  \n+ [ ] plus\n1. [ ] num\n- [>] arrow\n* [x] star done:2026-07-17 10:00",
+            None,
+        );
         // `- [ ]  ` is a task with empty text; `- [ ]`, `+`, `1.` and `[>]` are not.
         assert_eq!(all.len(), 2);
         assert_eq!(all[0].text, "");
@@ -858,19 +886,49 @@ Paragraph at the margin.
         assert_eq!(d("x.md", "**作成日**：2026-03-12"), None);
         assert_eq!(d("a/2026-09-18 meeting.md", "").as_deref(), Some("2026-09-18"));
         assert_eq!(d("20260514-1030.md", ""), None);
-        assert_eq!(d("x.md", "---\ncreated: 2026-01-02\n---").as_deref(), Some("2026-01-02"));
+        assert_eq!(
+            d("x.md", "---\ncreated: 2026-01-02\n---").as_deref(),
+            Some("2026-01-02")
+        );
         assert_eq!(d("x.md", "---\ncreated: 2026-01-02"), None);
 
         // An old note keeps its tagged tasks and loses its inbox items.
         let old = "- [ ] tagged #todo\n- [ ] untagged";
         let all = scan(&c, "lognote/2025-01-01.md", old, Some("2026-08-01"));
         let tasks = select(all.clone(), Want::default(), &Filter::default(), Sort::Priority, false);
-        let inbox = select(all, Want { inbox: true, ..Want::default() }, &Filter::default(), Sort::Priority, false);
+        let inbox = select(
+            all,
+            Want {
+                inbox: true,
+                ..Want::default()
+            },
+            &Filter::default(),
+            Sort::Priority,
+            false,
+        );
         assert_eq!(tasks.len(), 1);
         assert!(inbox.is_empty());
         // tasks/active.md never ages out.
-        let all = scan(&c, "tasks/active.md", "---\ndate: 2025-01-01\n---\n- [ ] untagged", Some("2026-08-01"));
-        assert_eq!(select(all, Want { inbox: true, ..Want::default() }, &Filter::default(), Sort::Priority, false).len(), 1);
+        let all = scan(
+            &c,
+            "tasks/active.md",
+            "---\ndate: 2025-01-01\n---\n- [ ] untagged",
+            Some("2026-08-01"),
+        );
+        assert_eq!(
+            select(
+                all,
+                Want {
+                    inbox: true,
+                    ..Want::default()
+                },
+                &Filter::default(),
+                Sort::Priority,
+                false
+            )
+            .len(),
+            1
+        );
     }
 
     #[test]
@@ -892,7 +950,15 @@ Paragraph at the margin.
         let all = scan(&c, "n.md", text, None);
         let sorted = select(all, Want::default(), &Filter::default(), Sort::Priority, false);
         let order: Vec<&str> = sorted.iter().map(|t| t.text.as_str()).collect();
-        assert_eq!(order, vec!["first #todo due:2026-10-02", "second #todo", "step of second", "none #todo"]);
+        assert_eq!(
+            order,
+            vec![
+                "first #todo due:2026-10-02",
+                "second #todo",
+                "step of second",
+                "none #todo"
+            ]
+        );
     }
 
     #[test]
@@ -940,7 +1006,8 @@ Paragraph at the margin.
             week_end: "2026-10-19".into(),
         };
         let texts = |v: Vec<Task>| v.into_iter().map(|t| t.lineno).collect::<Vec<_>>();
-        let pick = |filter: &Filter, reverse| texts(select(all.clone(), Want::default(), filter, Sort::Priority, reverse));
+        let pick =
+            |filter: &Filter, reverse| texts(select(all.clone(), Want::default(), filter, Sort::Priority, reverse));
         assert_eq!(pick(&f(State::Open, None, None), false), vec![1, 2, 4, 5]);
         // Reversed: the items turn round, the job's steps stay in order.
         assert_eq!(pick(&f(State::Open, None, None), true), vec![5, 4, 1, 2]);
@@ -951,18 +1018,40 @@ Paragraph at the margin.
         assert_eq!(pick(&f(State::Open, None, Some(DueFilter::Week)), false), vec![1, 2]);
         assert_eq!(pick(&f(State::Open, None, Some(DueFilter::None)), false), vec![5]);
         // The closed-only view drops the open job, so its done step is orphaned.
-        let closed = select(all.clone(), Want::default(), &f(State::Closed, None, None), Sort::Priority, false);
+        let closed = select(
+            all.clone(),
+            Want::default(),
+            &f(State::Closed, None, None),
+            Sort::Priority,
+            false,
+        );
         assert!(closed[0].orphaned);
 
-        let shown = select(all.clone(), Want::default(), &f(State::Open, None, None), Sort::Priority, false);
+        let shown = select(
+            all.clone(),
+            Want::default(),
+            &f(State::Open, None, None),
+            Sort::Priority,
+            false,
+        );
         let by_tag = group(&shown, Group::Tag, "2026-10-12", "2026-10-19");
         let keys: Vec<&GroupKey> = by_tag.iter().map(|(k, _)| k).collect();
         assert_eq!(keys, vec![&GroupKey::Tag("budget".into()), &GroupKey::NoTag]);
         assert_eq!(by_tag[0].1, vec![(0, false), (1, false)]);
         let by_due = group(&shown, Group::Due, "2026-10-12", "2026-10-19");
         let keys: Vec<&GroupKey> = by_due.iter().map(|(k, _)| k).collect();
-        assert_eq!(keys, vec![&GroupKey::Due(Bucket::Overdue), &GroupKey::Due(Bucket::Later), &GroupKey::Due(Bucket::None)]);
+        assert_eq!(
+            keys,
+            vec![
+                &GroupKey::Due(Bucket::Overdue),
+                &GroupKey::Due(Bucket::Later),
+                &GroupKey::Due(Bucket::None)
+            ]
+        );
         assert_eq!(tags_in(&shown), vec!["budget"]);
-        assert_eq!(bucket(Some("2026-10-12T15:00"), "2026-10-12", "2026-10-19"), Bucket::Today);
+        assert_eq!(
+            bucket(Some("2026-10-12T15:00"), "2026-10-12", "2026-10-19"),
+            Bucket::Today
+        );
     }
 }

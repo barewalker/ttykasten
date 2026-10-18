@@ -46,9 +46,7 @@ fn find_ids(line: &str) -> Vec<(usize, usize, usize)> {
 
 /// The first id in a line.
 pub fn read(line: &str) -> Option<&str> {
-    find_ids(line)
-        .first()
-        .map(|&(_, start, len)| &line[start..start + len])
+    find_ids(line).first().map(|&(_, start, len)| &line[start..start + len])
 }
 
 /// Removes every id together with the one whitespace byte before it.
@@ -97,8 +95,8 @@ pub fn mint(taken: &HashSet<String>, length: usize, alphabet: &str) -> String {
 
 /// Used instead of an unusable alphabet, as the plugin does.
 const DEFAULT_ALPHABET: [char; 36] = [
-    'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l', 'm', 'n', 'o', 'p', 'q', 'r',
-    's', 't', 'u', 'v', 'w', 'x', 'y', 'z', '0', '1', '2', '3', '4', '5', '6', '7', '8', '9',
+    'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l', 'm', 'n', 'o', 'p', 'q', 'r', 's', 't', 'u', 'v', 'w',
+    'x', 'y', 'z', '0', '1', '2', '3', '4', '5', '6', '7', '8', '9',
 ];
 
 fn draw(length: usize, chars: &[char]) -> String {
@@ -122,10 +120,7 @@ fn draw(length: usize, chars: &[char]) -> String {
 }
 
 fn fill_random(buf: &mut [u8]) {
-    if File::open("/dev/urandom")
-        .and_then(|mut f| f.read_exact(buf))
-        .is_ok()
-    {
+    if File::open("/dev/urandom").and_then(|mut f| f.read_exact(buf)).is_ok() {
         return;
     }
     // Fallback where /dev/urandom is missing: fill from the clock and a hash seed.

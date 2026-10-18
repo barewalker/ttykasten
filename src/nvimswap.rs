@@ -37,9 +37,9 @@ pub fn unsaved_pid(swap_dir: &Path, file: &Path) -> Option<u32> {
         let name = entry.file_name();
         let name = name.to_string_lossy();
         // `<encoded>.swp`, or `.swo`, `.swn` ... when several are open.
-        let is_swap = names.iter().any(|n| {
-            name.len() == n.len() + 4 && name.starts_with(n.as_str()) && name[n.len()..].starts_with(".s")
-        });
+        let is_swap = names
+            .iter()
+            .any(|n| name.len() == n.len() + 4 && name.starts_with(n.as_str()) && name[n.len()..].starts_with(".s"));
         if !is_swap {
             continue;
         }

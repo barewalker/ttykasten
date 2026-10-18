@@ -57,7 +57,8 @@ pub fn range(spec: &str, today: NaiveDate) -> Result<Range, String> {
             return Ok(Range::of(monday_of(jan4) + Duration::days((week - 1) * 7)));
         }
     }
-    if crate::task::valid_due(spec) && spec.len() == 10
+    if crate::task::valid_due(spec)
+        && spec.len() == 10
         && let Ok(d) = NaiveDate::parse_from_str(spec, "%Y-%m-%d")
     {
         return Ok(Range::of(monday_of(d)));
@@ -76,7 +77,12 @@ pub fn ahead_of(range: &Range, weeks: u32) -> Range {
     } else {
         format!("{}..{}", from.format("%G-W%V"), to.format("%G-W%V"))
     };
-    Range { label, from: from.format("%Y-%m-%d").to_string(), to: to.format("%Y-%m-%d").to_string(), monday: from }
+    Range {
+        label,
+        from: from.format("%Y-%m-%d").to_string(),
+        to: to.format("%Y-%m-%d").to_string(),
+        monday: from,
+    }
 }
 
 /// `MM-DD Ddd` for a YYYY-MM-DD date.
@@ -126,7 +132,10 @@ pub fn summarise<S: AsRef<str>>(lines: &[S], quote: usize) -> (Option<String>, V
     }
     let title = (opens_with_h1 && h1s == 1).then(|| headings.remove(0).1);
     let top = headings.iter().map(|(l, _)| *l).min().unwrap_or(1);
-    let outline = headings.iter().map(|(l, t)| format!("{}- {t}", "  ".repeat(l - top))).collect();
+    let outline = headings
+        .iter()
+        .map(|(l, t)| format!("{}- {t}", "  ".repeat(l - top)))
+        .collect();
     (title, outline, excerpt, more)
 }
 
@@ -134,7 +143,11 @@ fn body_start<S: AsRef<str>>(lines: &[S]) -> usize {
     if lines.first().map(AsRef::as_ref) != Some("---") {
         return 0;
     }
-    lines.iter().skip(1).position(|l| l.as_ref() == "---").map_or(0, |p| p + 2)
+    lines
+        .iter()
+        .skip(1)
+        .position(|l| l.as_ref() == "---")
+        .map_or(0, |p| p + 2)
 }
 
 /// The opening run of a fence (```` ``` ```` or `~~~`, any length).
@@ -197,7 +210,10 @@ pub fn digest_lines(
     };
     out.push(format!("# {}  {} to {}", range.label, range.from, range.to));
     out.push(String::new());
-    out.push(format!("{}, [[{weekly_name}]]", l.notes.replace("{}", &notes.len().to_string())));
+    out.push(format!(
+        "{}, [[{weekly_name}]]",
+        l.notes.replace("{}", &notes.len().to_string())
+    ));
     if let Some(cal) = calendar {
         let (rows, count) = cal(&range.from, &range.to);
         out.push(String::new());
@@ -261,7 +277,12 @@ pub fn digest_lines(
             }
         }
         // Equal keys fall back to path, then line, as in the plugin.
-        finished.sort_by(|a, b| a.done_at.cmp(&b.done_at).then(a.rel.cmp(&b.rel)).then(a.lineno.cmp(&b.lineno)));
+        finished.sort_by(|a, b| {
+            a.done_at
+                .cmp(&b.done_at)
+                .then(a.rel.cmp(&b.rel))
+                .then(a.lineno.cmp(&b.lineno))
+        });
         due_ahead.sort_by(|a, b| a.due.cmp(&b.due).then(a.rel.cmp(&b.rel)).then(a.lineno.cmp(&b.lineno)));
         if !finished.is_empty() {
             let rows = finished.iter().map(|t| task_line(t, &d.marks.done)).collect();
@@ -282,7 +303,11 @@ pub fn digest_lines(
         }
         if !due_ahead.is_empty() {
             let rows = due_ahead.iter().map(|t| task_line(t, &d.marks.open)).collect();
-            section(&mut out, format!("{} {} to {} ({})", l.due, a.from, a.to, due_ahead.len()), rows);
+            section(
+                &mut out,
+                format!("{} {} to {} ({})", l.due, a.from, a.to, due_ahead.len()),
+                rows,
+            );
         }
     }
     out
@@ -300,7 +325,10 @@ mod tests {
     fn ranges() {
         let wed = d(2026, 10, 7);
         let r = range("", wed).unwrap();
-        assert_eq!((r.label.as_str(), r.from.as_str(), r.to.as_str()), ("2026-W41", "2026-10-05", "2026-10-11"));
+        assert_eq!(
+            (r.label.as_str(), r.from.as_str(), r.to.as_str()),
+            ("2026-W41", "2026-10-05", "2026-10-11")
+        );
         assert_eq!(range("-1", wed).unwrap().label, "2026-W40");
         assert_eq!(range("+2", wed).unwrap().label, "2026-W43");
         assert_eq!(range("2026-W37", wed).unwrap().from, "2026-09-07");
@@ -311,14 +339,29 @@ mod tests {
         assert!(range("2026-W54", wed).is_err());
         assert!(range("next", wed).is_err());
         let a = ahead_of(&range("", wed).unwrap(), 2);
-        assert_eq!((a.label.as_str(), a.from.as_str(), a.to.as_str()), ("2026-W42..2026-W43", "2026-10-12", "2026-10-25"));
+        assert_eq!(
+            (a.label.as_str(), a.from.as_str(), a.to.as_str()),
+            ("2026-W42..2026-W43", "2026-10-12", "2026-10-25")
+        );
     }
 
     #[test]
     fn summaries() {
         let lines = [
-            "---", "title: x", "---", "# Meeting with Acme", "", "intro line", "## Agenda", "- a", "### Detail",
-            "```", "# not a heading", "```", "more", "and more",
+            "---",
+            "title: x",
+            "---",
+            "# Meeting with Acme",
+            "",
+            "intro line",
+            "## Agenda",
+            "- a",
+            "### Detail",
+            "```",
+            "# not a heading",
+            "```",
+            "more",
+            "and more",
         ];
         let (title, outline, excerpt, more) = summarise(&lines, 3);
         assert_eq!(title.as_deref(), Some("Meeting with Acme"));

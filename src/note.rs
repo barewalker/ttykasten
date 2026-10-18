@@ -89,10 +89,7 @@ mod tests {
     use chrono::NaiveDate;
 
     fn at(y: i32, m: u32, d: u32) -> NaiveDateTime {
-        NaiveDate::from_ymd_opt(y, m, d)
-            .unwrap()
-            .and_hms_opt(8, 0, 0)
-            .unwrap()
+        NaiveDate::from_ymd_opt(y, m, d).unwrap().and_hms_opt(8, 0, 0).unwrap()
     }
 
     #[test]

@@ -54,4 +54,3 @@ pub fn run(argv: &[String], timeout: Duration) -> Result<String, String> {
     }
     Ok(out)
 }
-

@@ -34,12 +34,8 @@ pub fn read_lines(path: &Path) -> io::Result<Vec<String>> {
     split_lines(&bytes)
         .into_iter()
         .map(|l| {
-            String::from_utf8(l.to_vec()).map_err(|_| {
-                io::Error::new(
-                    io::ErrorKind::InvalidData,
-                    format!("{}: not UTF-8", path.display()),
-                )
-            })
+            String::from_utf8(l.to_vec())
+                .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, format!("{}: not UTF-8", path.display())))
         })
         .collect()
 }

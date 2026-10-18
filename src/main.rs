@@ -19,8 +19,8 @@ use unicode_width::UnicodeWidthStr;
 
 use ttykasten::config::{self, Config, MenuItem};
 use ttykasten::i18n::{Msgs, fill};
-use ttykasten::note::{self, Periodic};
 use ttykasten::journal::{Entry, Journal, Undo};
+use ttykasten::note::{self, Periodic};
 use ttykasten::tasks::{self, DueFilter, Group, Scanner, Sort, State, Want};
 use ttykasten::{blockid, calendar, fileio, link, nvimswap, preview, romaji, task, template, trim, week};
 
@@ -221,17 +221,22 @@ impl App {
         if path.exists() {
             eprintln!("ttykasten: {}", fill(self.msg.opening_existing, &[&path.display()]));
         } else {
-            let picked = if self.cfg.pick_template { self.pick_template()? } else { None };
+            let picked = if self.cfg.pick_template {
+                self.pick_template()?
+            } else {
+                None
+            };
             let content = match picked.as_ref().or(self.cfg.new_note_template.as_ref()) {
                 Some(t) => {
                     let now = now();
-                    template::load(&self.home, &self.cfg.hdate_format, t, &title, now, &|k| self.agenda(k, now))
+                    template::load(&self.home, &self.cfg.hdate_format, t, &title, now, &|k| {
+                        self.agenda(k, now)
+                    })
                 }
                 None => format!("# {title}"),
             };
             self.guard(&path)?;
-            fileio::write_text(&path, &content)
-                .with_context(|| fill(self.msg.cannot_write, &[&path.display()]))?;
+            fileio::write_text(&path, &content).with_context(|| fill(self.msg.cannot_write, &[&path.display()]))?;
         }
         self.edit(&path)
     }
@@ -264,8 +269,7 @@ impl App {
                 &|k| self.agenda(k, t),
             );
             self.guard(&path)?;
-            fileio::write_text(&path, &content)
-                .with_context(|| fill(self.msg.cannot_write, &[&path.display()]))?;
+            fileio::write_text(&path, &content).with_context(|| fill(self.msg.cannot_write, &[&path.display()]))?;
         }
         self.edit(&path)
     }
@@ -327,9 +331,13 @@ impl App {
         };
         let s = s.trim();
         let well_formed = s.len() == 10
-            && s.bytes()
-                .enumerate()
-                .all(|(i, b)| if i == 4 || i == 7 { b == b'-' } else { b.is_ascii_digit() });
+            && s.bytes().enumerate().all(|(i, b)| {
+                if i == 4 || i == 7 {
+                    b == b'-'
+                } else {
+                    b.is_ascii_digit()
+                }
+            });
         let date = well_formed
             .then(|| NaiveDate::parse_from_str(s, "%Y-%m-%d").ok())
             .flatten()
@@ -346,8 +354,15 @@ impl App {
     fn find(&self) -> Result<()> {
         let files = self.note_files("--no-ignore-vcs")?;
         let items: String = files.iter().map(|f| format!("{f}\n")).collect();
-        let mut args = vec!["--scheme=path".to_string(), format!("--prompt={}", self.msg.prompt_find)];
-        let index = if romaji::available(&self.cfg.romaji) { Some(self.write_find_index(&files)?) } else { None };
+        let mut args = vec![
+            "--scheme=path".to_string(),
+            format!("--prompt={}", self.msg.prompt_find),
+        ];
+        let index = if romaji::available(&self.cfg.romaji) {
+            Some(self.write_find_index(&files)?)
+        } else {
+            None
+        };
         if let Some(index) = &index {
             let exe = self.self_command()?;
             let idx = shell_quote(&index.to_string_lossy());
@@ -375,7 +390,13 @@ impl App {
         if self.cfg.romaji.headings {
             let glob = format!("*.{}", self.cfg.extension);
             let out = Command::new("rg")
-                .args(["--no-messages", "--no-ignore-vcs", "--heading", "--with-filename", "--no-line-number"])
+                .args([
+                    "--no-messages",
+                    "--no-ignore-vcs",
+                    "--heading",
+                    "--with-filename",
+                    "--no-line-number",
+                ])
                 .args(["--color", "never", "--glob", &glob, "-e", r"^#+\s+\S"])
                 .current_dir(&self.home)
                 .output()
@@ -492,8 +513,15 @@ impl App {
         let print = |fixed: bool| -> Result<bool> {
             let glob = format!("*.{}", self.cfg.extension);
             let mut cmd = Command::new("rg");
-            cmd.args(["--no-ignore", "--no-messages", "--null", "--line-number", "--no-heading", "--color=never"])
-                .args(["--smart-case", "--glob", &glob]);
+            cmd.args([
+                "--no-ignore",
+                "--no-messages",
+                "--null",
+                "--line-number",
+                "--no-heading",
+                "--color=never",
+            ])
+            .args(["--smart-case", "--glob", &glob]);
             if fixed {
                 cmd.arg("--fixed-strings");
             }
@@ -507,7 +535,11 @@ impl App {
                 if let Some((file, rest)) = record.split_once('\0')
                     && let Some((lineno, line)) = rest.split_once(':')
                 {
-                    let _ = writeln!(w, "{file}\t{lineno}\t{file}:{lineno}: {}", trim(line).replace('\t', " "));
+                    let _ = writeln!(
+                        w,
+                        "{file}\t{lineno}\t{file}:{lineno}: {}",
+                        trim(line).replace('\t', " ")
+                    );
                 }
             }
             Ok(true)
@@ -524,7 +556,15 @@ impl App {
     fn tags(&self) -> Result<()> {
         let glob = format!("*.{}", self.cfg.extension);
         let out = Command::new("rg")
-            .args(["--no-ignore", "--no-messages", "--no-filename", "--no-line-number", "-o", "--glob", &glob])
+            .args([
+                "--no-ignore",
+                "--no-messages",
+                "--no-filename",
+                "--no-line-number",
+                "-o",
+                "--glob",
+                &glob,
+            ])
             .args(["-e", "#[A-Za-z0-9_-]+"])
             .current_dir(&self.home)
             .output()
@@ -538,7 +578,11 @@ impl App {
             return Ok(());
         }
         let items: String = counts.iter().map(|(t, n)| format!("{t}\t{t}  ({n})\n")).collect();
-        let args = ["--delimiter=\t", "--with-nth=2..", &format!("--prompt={}", self.msg.prompt_tag)];
+        let args = [
+            "--delimiter=\t",
+            "--with-nth=2..",
+            &format!("--prompt={}", self.msg.prompt_tag),
+        ];
         let Some(out) = self.fzf(&items, &args)? else {
             return Ok(());
         };
@@ -547,7 +591,14 @@ impl App {
         };
         let pattern = format!("{}([^A-Za-z0-9_-]|$)", regex::escape(tag));
         let out = Command::new("rg")
-            .args(["--no-ignore", "--no-messages", "--null", "--line-number", "--no-heading", "--color=never"])
+            .args([
+                "--no-ignore",
+                "--no-messages",
+                "--null",
+                "--line-number",
+                "--no-heading",
+                "--color=never",
+            ])
             .args(["--glob", &glob, "-e", &pattern])
             .current_dir(&self.home)
             .output()?;
@@ -560,7 +611,10 @@ impl App {
             })
             .collect();
         lines.sort();
-        let items: String = lines.iter().map(|(f, n, t)| format!("{f}\t{n}\t{f}:{n}: {t}\n")).collect();
+        let items: String = lines
+            .iter()
+            .map(|(f, n, t)| format!("{f}\t{n}\t{f}:{n}: {t}\n"))
+            .collect();
         let mut args = vec![
             "--delimiter=\t".to_string(),
             "--with-nth=3..".into(),
@@ -600,8 +654,14 @@ impl App {
                     continue;
                 };
                 let rel = rel.to_string_lossy().into_owned();
-                let ignored = self.cfg.recent.ignore_dirs.iter().any(|d| rel == *d || rel.strip_prefix(d.as_str()).is_some_and(|r| r.starts_with('/')));
-                if rel.ends_with(&ext) && !ignored
+                let ignored = self
+                    .cfg
+                    .recent
+                    .ignore_dirs
+                    .iter()
+                    .any(|d| rel == *d || rel.strip_prefix(d.as_str()).is_some_and(|r| r.starts_with('/')));
+                if rel.ends_with(&ext)
+                    && !ignored
                     && let Ok(m) = e.metadata().and_then(|m| m.modified())
                 {
                     found.push((m, rel));
@@ -623,7 +683,12 @@ impl App {
                 format!("{rel}\t{when:<11} {rel}\n")
             })
             .collect();
-        let mut args = vec!["--delimiter=\t".to_string(), "--with-nth=2..".into(), "--no-sort".into(), format!("--prompt={}", self.msg.prompt_recent)];
+        let mut args = vec![
+            "--delimiter=\t".to_string(),
+            "--with-nth=2..".into(),
+            "--no-sort".into(),
+            format!("--prompt={}", self.msg.prompt_recent),
+        ];
         args.extend(self.preview_arg("{1}")?);
         let args: Vec<&str> = args.iter().map(String::as_str).collect();
         let Some(out) = self.fzf(&items, &args)? else {
@@ -643,23 +708,36 @@ impl App {
         let mut args = vec!["--scheme=path".to_string(), format!("--prompt={prompt}")];
         args.extend(self.preview_arg("{}")?);
         let args: Vec<&str> = args.iter().map(String::as_str).collect();
-        Ok(self.fzf(&items, &args)?.and_then(|o| o.into_iter().next()).filter(|r| !r.is_empty()))
+        Ok(self
+            .fzf(&items, &args)?
+            .and_then(|o| o.into_iter().next())
+            .filter(|r| !r.is_empty()))
     }
 
     /// The template for a new note, picked from `home/templates/` with the
     /// default first. None (Esc) means the default.
     fn pick_template(&self) -> Result<Option<String>> {
         let dir = self.home.join("templates");
-        let out = Command::new("rg").args(["--files", "--no-messages", "--no-ignore"]).current_dir(&dir).output();
+        let out = Command::new("rg")
+            .args(["--files", "--no-messages", "--no-ignore"])
+            .current_dir(&dir)
+            .output();
         let Ok(out) = out else {
             return Ok(None);
         };
-        let mut files: Vec<String> = String::from_utf8_lossy(&out.stdout).lines().map(str::to_string).collect();
+        let mut files: Vec<String> = String::from_utf8_lossy(&out.stdout)
+            .lines()
+            .map(str::to_string)
+            .collect();
         if files.is_empty() {
             return Ok(None);
         }
         files.sort();
-        let default = self.cfg.new_note_template.as_deref().map(|t| t.strip_prefix("templates/").unwrap_or(t).to_string());
+        let default = self
+            .cfg
+            .new_note_template
+            .as_deref()
+            .map(|t| t.strip_prefix("templates/").unwrap_or(t).to_string());
         if let Some(d) = &default
             && let Some(i) = files.iter().position(|f| f == d)
         {
@@ -667,7 +745,10 @@ impl App {
             files.insert(0, f);
         }
         let items: String = files.iter().map(|f| format!("{f}\n")).collect();
-        let mut args = vec!["--no-sort".to_string(), format!("--prompt={}", self.msg.prompt_template)];
+        let mut args = vec![
+            "--no-sort".to_string(),
+            format!("--prompt={}", self.msg.prompt_template),
+        ];
         args.extend(self.preview_arg("templates/{}")?);
         let args: Vec<&str> = args.iter().map(String::as_str).collect();
         // Only the basename is kept, as in the plugin.
@@ -710,10 +791,16 @@ impl App {
         if new_name == old_name {
             return Ok(());
         }
-        let ext = old_path.extension().map(|e| e.to_string_lossy().into_owned()).unwrap_or_default();
+        let ext = old_path
+            .extension()
+            .map(|e| e.to_string_lossy().into_owned())
+            .unwrap_or_default();
         let new_path = old_path.with_file_name(format!("{new_name}.{ext}"));
         if new_path.exists() {
-            bail!(fill(self.msg.rename_exists, &[&new_path.strip_prefix(&self.home).unwrap_or(&new_path).display()]));
+            bail!(fill(
+                self.msg.rename_exists,
+                &[&new_path.strip_prefix(&self.home).unwrap_or(&new_path).display()]
+            ));
         }
         // Every rewrite is worked out first, so nothing moves if one is refused.
         let mut rewrites: Vec<(PathBuf, Vec<String>)> = Vec::new();
@@ -725,13 +812,15 @@ impl App {
             let mut changed = false;
             let new_lines: Vec<String> = lines
                 .iter()
-                .map(|l| match link::retarget_line(l, &self.cfg.extension, &old_name, &new_name) {
-                    Some(n) => {
-                        changed = true;
-                        n
-                    }
-                    None => l.clone(),
-                })
+                .map(
+                    |l| match link::retarget_line(l, &self.cfg.extension, &old_name, &new_name) {
+                        Some(n) => {
+                            changed = true;
+                            n
+                        }
+                        None => l.clone(),
+                    },
+                )
                 .collect();
             if changed {
                 rewrites.push((path, new_lines));
@@ -759,7 +848,11 @@ impl App {
             .into_iter()
             .filter_map(|rel| fileio::read_lines(&self.home.join(&rel)).ok().map(|l| (rel, l)))
             .collect();
-        Ok(ttykasten::graph::build(&notes, &self.cfg.extension, &self.cfg.graph.ignore_dirs))
+        Ok(ttykasten::graph::build(
+            &notes,
+            &self.cfg.extension,
+            &self.cfg.graph.ignore_dirs,
+        ))
     }
 
     /// A list of `rel\tline\tshown` rows in fzf; enter opens the line.
@@ -795,7 +888,11 @@ impl App {
         let root = link::note_name(Path::new(&rel));
         let depth = self.cfg.graph.depth.max(1);
         let mut rows = vec![(rel.clone(), 1, format!("● {root}"))];
-        rows.extend(ttykasten::graph::tree(&g, &root, depth).into_iter().map(|r| (r.rel, r.lineno, r.display)));
+        rows.extend(
+            ttykasten::graph::tree(&g, &root, depth)
+                .into_iter()
+                .map(|r| (r.rel, r.lineno, r.display)),
+        );
         if rows.len() == 1 {
             eprintln!("ttykasten: {}", self.msg.nothing_found);
             return Ok(());
@@ -831,7 +928,11 @@ impl App {
     /// task's line; the keys in `tasks.keys` act on the task under the cursor
     /// or change the view, and reload the list.
     fn task_list(&self, inbox: bool) -> Result<()> {
-        let view = View { inbox, sort: Sort::parse(&self.cfg.tasks.sort), ..View::default() };
+        let view = View {
+            inbox,
+            sort: Sort::parse(&self.cfg.tasks.sort),
+            ..View::default()
+        };
         let lines = self.task_lines(&view)?;
         let exe = self.self_command()?;
         let kind = view.kind();
@@ -849,7 +950,10 @@ impl App {
             (&k.closed, view_key("closed")),
             (&k.filter_due, view_key("due-filter")),
             (&k.group, view_key("group")),
-            (&k.filter_tag, format!("execute({exe} task-tag-filter {kind})+{refresh}")),
+            (
+                &k.filter_tag,
+                format!("execute({exe} task-tag-filter {kind})+{refresh}"),
+            ),
             (&k.due, format!("execute({exe} task-due {line})+{refresh}")),
             (&k.capture, format!("execute({exe} task-capture)+{refresh}")),
         ];
@@ -862,7 +966,12 @@ impl App {
             format!("--header={}", self.keys_header()),
             "--preview-window=+{2}-/2".into(),
         ];
-        args.extend(binds.iter().filter(|(key, _)| !key.is_empty()).map(|(key, act)| format!("--bind={key}:{act}")));
+        args.extend(
+            binds
+                .iter()
+                .filter(|(key, _)| !key.is_empty())
+                .map(|(key, act)| format!("--bind={key}:{act}")),
+        );
         args.extend(self.preview_arg("{1} {2}")?);
         let args: Vec<&str> = args.iter().map(String::as_str).collect();
         let Some(out) = self.fzf(&lines, &args)? else {
@@ -878,8 +987,18 @@ impl App {
     fn keys_header(&self) -> String {
         let k = &self.cfg.tasks.keys;
         let keys: [&dyn std::fmt::Display; 12] = [
-            &k.done, &k.cancel, &k.tag, &k.due, &k.capture, &k.undo, &k.sort, &k.reverse, &k.closed, &k.filter_tag,
-            &k.filter_due, &k.group,
+            &k.done,
+            &k.cancel,
+            &k.tag,
+            &k.due,
+            &k.capture,
+            &k.undo,
+            &k.sort,
+            &k.reverse,
+            &k.closed,
+            &k.filter_tag,
+            &k.filter_due,
+            &k.group,
         ];
         fill(self.msg.tasks_keys, &keys)
     }
@@ -887,7 +1006,11 @@ impl App {
     /// The prompt carries the view, so the keys' commands can read it back
     /// from $FZF_PROMPT: `tasks [due, reversed, #budget, overdue]> `.
     fn view_prompt(&self, view: &View) -> String {
-        let name = if view.inbox { self.msg.prompt_inbox } else { self.msg.prompt_tasks };
+        let name = if view.inbox {
+            self.msg.prompt_inbox
+        } else {
+            self.msg.prompt_tasks
+        };
         format!("{name} [{}]> ", view.encode())
     }
 
@@ -911,14 +1034,27 @@ impl App {
     }
 
     fn scanner(&self) -> Result<Scanner<'_>> {
-        Scanner::new(&self.cfg)
-            .map_err(|e| anyhow!(fill(self.msg.bad_pattern, &[&"tasks.date_patterns / tasks.headings", &e])))
+        Scanner::new(&self.cfg).map_err(|e| {
+            anyhow!(fill(
+                self.msg.bad_pattern,
+                &[&"tasks.date_patterns / tasks.headings", &e]
+            ))
+        })
     }
 
     /// The tasks a view shows, in order.
     fn view_tasks(&self, scanner: &Scanner, view: &View) -> Result<Scanned> {
         let (all, texts) = self.scan_tasks(scanner)?;
-        let shown = tasks::select(all, Want { inbox: view.inbox, ..Want::default() }, &view.filter(), view.sort, view.reverse);
+        let shown = tasks::select(
+            all,
+            Want {
+                inbox: view.inbox,
+                ..Want::default()
+            },
+            &view.filter(),
+            view.sort,
+            view.reverse,
+        );
         Ok((shown, texts))
     }
 
@@ -930,7 +1066,10 @@ impl App {
         let scanner = self.scanner()?;
         let (shown, texts) = self.view_tasks(&scanner, view)?;
         let row = |t: &tasks::Task, label: &str, orphaned: bool| {
-            let raw = texts.get(&t.rel).and_then(|l| l.get(t.lineno - 1)).map_or("", String::as_str);
+            let raw = texts
+                .get(&t.rel)
+                .and_then(|l| l.get(t.lineno - 1))
+                .map_or("", String::as_str);
             format!(
                 "{}\t{}\t{}\t{label}{}  \x1b[2m{}:{}\x1b[0m\n",
                 t.rel,
@@ -995,7 +1134,10 @@ impl App {
     /// `task-lines KIND VIEW`, for fzf's reload; VIEW is what the prompt
     /// carries between the brackets.
     fn print_task_lines(&self, args: &[String]) -> Result<()> {
-        let view = View::decode(args.first().map(String::as_str) == Some("inbox"), args.get(1).map_or("", String::as_str));
+        let view = View::decode(
+            args.first().map(String::as_str) == Some("inbox"),
+            args.get(1).map_or("", String::as_str),
+        );
         let lines = self.task_lines(&view)?;
         let _ = std::io::stdout().lock().write_all(lines.as_bytes());
         Ok(())
@@ -1080,7 +1222,10 @@ impl App {
     /// and leaves it for the list's refresh to apply; the first row clears
     /// the filter. Esc leaves the view as it is.
     fn task_tag_filter(&self, args: &[String]) -> Result<()> {
-        let mut view = View::from_prompt(args.first().map(String::as_str) == Some("inbox"), &env::var("FZF_PROMPT").unwrap_or_default());
+        let mut view = View::from_prompt(
+            args.first().map(String::as_str) == Some("inbox"),
+            &env::var("FZF_PROMPT").unwrap_or_default(),
+        );
         view.tag = None;
         let scanner = self.scanner()?;
         let (shown, _) = self.view_tasks(&scanner, &view)?;
@@ -1091,7 +1236,11 @@ impl App {
             return Ok(());
         };
         let picked = out.first().map_or("", String::as_str);
-        let tag = if picked == self.msg.all_tags { "" } else { picked.trim_start_matches('#') };
+        let tag = if picked == self.msg.all_tags {
+            ""
+        } else {
+            picked.trim_start_matches('#')
+        };
         if let Some(p) = self.status_path() {
             if let Some(dir) = p.parent() {
                 let _ = fs::create_dir_all(dir);
@@ -1215,13 +1364,21 @@ impl App {
                 None => return Ok(Err(self.refusal(task::Refusal::BadDate, spec))),
             }
         };
-        let unchanged = if spec.is_empty() { self.msg.no_due_to_clear } else { self.msg.due_unchanged };
+        let unchanged = if spec.is_empty() {
+            self.msg.no_due_to_clear
+        } else {
+            self.msg.due_unchanged
+        };
         let mut same = false;
         let r = self.rewrite_listed(rel, lineno, hash, |line| {
             let out = task::due_line(line, &date)?;
             same = out == line;
             // An unchanged line is not written; report it as a refusal.
-            if same { Err(task::Refusal::NothingToTag) } else { Ok(out) }
+            if same {
+                Err(task::Refusal::NothingToTag)
+            } else {
+                Ok(out)
+            }
         })?;
         Ok(match r {
             Err(_) if same => Err(unchanged.to_string()),
@@ -1273,7 +1430,9 @@ impl App {
     fn capture_text(&self, rel: &str, text: &str, due: Option<&str>) -> Result<Option<String>> {
         let path = self.home.join(rel);
         self.guard(&path)?;
-        match task::capture(&self.cfg, &path, text, due).with_context(|| fill(self.msg.cannot_write, &[&path.display()]))? {
+        match task::capture(&self.cfg, &path, text, due)
+            .with_context(|| fill(self.msg.cannot_write, &[&path.display()]))?
+        {
             Some((line, lineno)) => {
                 self.remember(rel, lineno, None, &line);
                 Ok(Some(fill(self.msg.captured, &[&rel, &line])))
@@ -1287,14 +1446,25 @@ impl App {
     fn collect_tags(&self) -> Result<Vec<String>> {
         let glob = format!("*.{}", self.cfg.extension);
         let out = Command::new("rg")
-            .args(["--no-filename", "--no-messages", "--no-line-number", "-o", "--glob", &glob])
+            .args([
+                "--no-filename",
+                "--no-messages",
+                "--no-line-number",
+                "-o",
+                "--glob",
+                &glob,
+            ])
             .args(["-e", "#[A-Za-z0-9_-]+"])
             .current_dir(&self.home)
             .output()
             .with_context(|| fill(self.msg.cannot_start, &[&"rg"]))?;
         let text = String::from_utf8_lossy(&out.stdout);
         let front = self.cfg.tasks.require_tag.as_ref().map(|t| format!("#{t}"));
-        let mut set: Vec<String> = text.lines().filter(|t| Some(*t) != front.as_deref()).map(str::to_string).collect();
+        let mut set: Vec<String> = text
+            .lines()
+            .filter(|t| Some(*t) != front.as_deref())
+            .map(str::to_string)
+            .collect();
         set.sort();
         set.dedup();
         if let Some(f) = front {
@@ -1313,8 +1483,8 @@ impl App {
         if picked.is_empty() {
             return Ok(());
         }
-        let scanner = Scanner::new(&self.cfg)
-            .map_err(|e| anyhow!(fill(self.msg.bad_pattern, &[&"tasks.headings", &e])))?;
+        let scanner =
+            Scanner::new(&self.cfg).map_err(|e| anyhow!(fill(self.msg.bad_pattern, &[&"tasks.headings", &e])))?;
         let mut by_note: Vec<(String, Vec<(usize, String)>)> = Vec::new();
         for (rel, idx, listed) in picked {
             match by_note.iter_mut().find(|(r, _)| *r == rel) {
@@ -1371,7 +1541,10 @@ impl App {
     fn mint_ids(&self) -> Result<()> {
         let files = self.note_files("--no-ignore-vcs")?;
         let list: String = files.iter().map(|f| format!("{f}\n")).collect();
-        let mut args = vec!["--scheme=path".to_string(), format!("--prompt={}", self.msg.prompt_note)];
+        let mut args = vec![
+            "--scheme=path".to_string(),
+            format!("--prompt={}", self.msg.prompt_note),
+        ];
         args.extend(self.preview_arg("{}")?);
         let args: Vec<&str> = args.iter().map(String::as_str).collect();
         let Some(out) = self.fzf(&list, &args)? else {
@@ -1380,8 +1553,8 @@ impl App {
         let Some(rel) = out.first().filter(|r| !r.is_empty()).cloned() else {
             return Ok(());
         };
-        let scanner = Scanner::new(&self.cfg)
-            .map_err(|e| anyhow!(fill(self.msg.bad_pattern, &[&"tasks.headings", &e])))?;
+        let scanner =
+            Scanner::new(&self.cfg).map_err(|e| anyhow!(fill(self.msg.bad_pattern, &[&"tasks.headings", &e])))?;
         let path = self.home.join(&rel);
         let mut lines = fileio::read_lines(&path)?;
         let scannable = scanner.scannable_lines(&lines);
@@ -1440,13 +1613,16 @@ impl App {
             .map(|p| regex::Regex::new(p))
             .collect::<Result<Vec<_>, _>>()
             .map_err(|e| anyhow!(fill(self.msg.bad_pattern, &[&"week.ignore_patterns", &e])))?;
-        let scanner = Scanner::new(&self.cfg)
-            .map_err(|e| anyhow!(fill(self.msg.bad_pattern, &[&"tasks.date_patterns", &e])))?;
+        let scanner =
+            Scanner::new(&self.cfg).map_err(|e| anyhow!(fill(self.msg.bad_pattern, &[&"tasks.date_patterns", &e])))?;
         let monday = range.monday.and_hms_opt(12, 0, 0).context("monday")?;
         let weekly = Periodic::Weekly.rel(&self.cfg, monday);
         let mut notes = Vec::new();
         for rel in self.note_files("--no-ignore-vcs")? {
-            let in_dir = w.ignore_dirs.iter().any(|d| rel == *d || rel.strip_prefix(d.as_str()).is_some_and(|r| r.starts_with('/')));
+            let in_dir = w
+                .ignore_dirs
+                .iter()
+                .any(|d| rel == *d || rel.strip_prefix(d.as_str()).is_some_and(|r| r.starts_with('/')));
             if in_dir || patterns.iter().any(|p| p.is_match(&rel)) || rel == weekly {
                 continue;
             }
@@ -1470,13 +1646,23 @@ impl App {
         let range = self.week_range(spec)?;
         let notes = self.week_notes(&range)?;
         if notes.is_empty() {
-            eprintln!("ttykasten: {}", fill(self.msg.no_notes_in_week, &[&range.label, &range.from, &range.to]));
+            eprintln!(
+                "ttykasten: {}",
+                fill(self.msg.no_notes_in_week, &[&range.label, &range.from, &range.to])
+            );
             return Ok(());
         }
         let ext = format!(".{}", self.cfg.extension);
         let items: String = notes
             .iter()
-            .map(|n| format!("{}\t{}  {}\n", n.rel, week::day_label(&n.date), n.rel.strip_suffix(&ext).unwrap_or(&n.rel)))
+            .map(|n| {
+                format!(
+                    "{}\t{}  {}\n",
+                    n.rel,
+                    week::day_label(&n.date),
+                    n.rel.strip_suffix(&ext).unwrap_or(&n.rel)
+                )
+            })
             .collect();
         let mut args = vec![
             "--delimiter=\t".to_string(),
@@ -1531,15 +1717,29 @@ impl App {
         let notes = self.week_notes(&range)?;
         let d = &self.cfg.week.digest;
         let tasks = if d.tasks {
-            let scanner = Scanner::new(&self.cfg)
-                .map_err(|e| anyhow!(fill(self.msg.bad_pattern, &[&"tasks.date_patterns / tasks.headings", &e])))?;
+            let scanner = Scanner::new(&self.cfg).map_err(|e| {
+                anyhow!(fill(
+                    self.msg.bad_pattern,
+                    &[&"tasks.date_patterns / tasks.headings", &e]
+                ))
+            })?;
             let mut all = Vec::new();
             for rel in self.checkbox_notes()? {
                 if let Ok(lines) = fileio::read_lines(&self.home.join(&rel)) {
                     scanner.scan_note(&rel, &lines, None, &mut all);
                 }
             }
-            tasks::select(all, Want { inbox: false, done: true, cancelled: false }, &tasks::Filter::default(), Sort::Added, false)
+            tasks::select(
+                all,
+                Want {
+                    inbox: false,
+                    done: true,
+                    cancelled: false,
+                },
+                &tasks::Filter::default(),
+                Sort::Added,
+                false,
+            )
         } else {
             Vec::new()
         };
@@ -1559,9 +1759,9 @@ impl App {
             .collect();
         let cal = &self.cfg.calendar;
         let extras = week::Extras {
-            calendar: cal
-                .enabled
-                .then(|| Box::new(move |from: &str, to: &str| calendar::range_lines(cal, from, to)) as week::CalendarFn),
+            calendar: cal.enabled.then(|| {
+                Box::new(move |from: &str, to: &str| calendar::range_lines(cal, from, to)) as week::CalendarFn
+            }),
             sources,
         };
         let monday = range.monday.and_hms_opt(12, 0, 0).context("monday")?;
@@ -1573,7 +1773,12 @@ impl App {
     /// `(unavailable: …)` line when the command fails.
     fn source_lines(&self, command: &str) -> Vec<String> {
         let unavailable = &self.cfg.week.digest.labels.unavailable;
-        let out = Command::new("sh").arg("-c").arg(command).current_dir(&self.home).stdin(Stdio::null()).output();
+        let out = Command::new("sh")
+            .arg("-c")
+            .arg(command)
+            .current_dir(&self.home)
+            .stdin(Stdio::null())
+            .output();
         match out {
             Ok(o) if o.status.success() => {
                 let mut lines: Vec<String> = String::from_utf8_lossy(&o.stdout).lines().map(str::to_string).collect();
@@ -1586,7 +1791,14 @@ impl App {
                 let err = String::from_utf8_lossy(&o.stderr);
                 let first = err.lines().next().unwrap_or("").to_string();
                 let code = o.status.code().unwrap_or(-1);
-                vec![format!("({unavailable}: exited {code}{})", if first.is_empty() { String::new() } else { format!(": {first}") })]
+                vec![format!(
+                    "({unavailable}: exited {code}{})",
+                    if first.is_empty() {
+                        String::new()
+                    } else {
+                        format!(": {first}")
+                    }
+                )]
             }
             Err(e) => vec![format!("({unavailable}: {e})")],
         }
@@ -1706,7 +1918,12 @@ impl App {
                     continue;
                 }
                 let shown = line.replace('\t', " ");
-                items.push_str(&format!("{}\t{rel}\t{}\t{rel}:{}: {shown}\n", picked.len(), i + 1, i + 1));
+                items.push_str(&format!(
+                    "{}\t{rel}\t{}\t{rel}:{}: {shown}\n",
+                    picked.len(),
+                    i + 1,
+                    i + 1
+                ));
                 picked.push((rel.clone(), i, line));
             }
         }
@@ -1753,8 +1970,7 @@ impl App {
         if let Some(new_line) = made.new_line {
             self.guard(&path)?;
             lines[idx] = new_line;
-            fileio::write_lines(&path, &lines)
-                .with_context(|| fill(self.msg.cannot_write, &[&path.display()]))?;
+            fileio::write_lines(&path, &lines).with_context(|| fill(self.msg.cannot_write, &[&path.display()]))?;
         }
         self.copy(&made.link);
         Ok(Some(made.link))
@@ -1781,17 +1997,21 @@ impl App {
             fileio::read_lines(&path)?
         } else {
             fs::create_dir_all(self.home.join(kind.dir(cfg)))?;
-            template::load(&self.home, &cfg.hdate_format, kind.template(cfg), &kind.name(cfg, now), now, &|k| {
-                self.agenda(k, now)
-            })
-                .split('\n')
-                .map(str::to_string)
-                .collect()
+            template::load(
+                &self.home,
+                &cfg.hdate_format,
+                kind.template(cfg),
+                &kind.name(cfg, now),
+                now,
+                &|k| self.agenda(k, now),
+            )
+            .split('\n')
+            .map(str::to_string)
+            .collect()
         };
         lines.push(format!("{}{link}", cfg.block_id.daily_bullet));
         self.guard(&path)?;
-        fileio::write_lines(&path, &lines)
-            .with_context(|| fill(self.msg.cannot_write, &[&path.display()]))?;
+        fileio::write_lines(&path, &lines).with_context(|| fill(self.msg.cannot_write, &[&path.display()]))?;
         println!("{}", fill(self.msg.linked_into, &[&link, &rel, &lines.len()]));
         Ok(())
     }
@@ -1811,7 +2031,13 @@ impl App {
         };
         let glob = format!("*.{}", self.cfg.extension);
         let out = Command::new("rg")
-            .args(["--no-ignore", "--no-messages", "--null", "--line-number", "--no-heading"])
+            .args([
+                "--no-ignore",
+                "--no-messages",
+                "--null",
+                "--line-number",
+                "--no-heading",
+            ])
             .args(["--color=never", "--fixed-strings", "--glob", &glob, "[["])
             .current_dir(&self.home)
             .output()
@@ -1915,12 +2141,7 @@ impl App {
 
     /// fzf's output as lines, or None if cancelled (Esc etc.). `fzf.opts` from the
     /// config come after ttykasten's arguments, so they win.
-    fn run_fzf(
-        &self,
-        stdin: Stdio,
-        items: Option<&str>,
-        args: &[&str],
-    ) -> Result<Option<Vec<String>>> {
+    fn run_fzf(&self, stdin: Stdio, items: Option<&str>, args: &[&str]) -> Result<Option<Vec<String>>> {
         let fzf = &self.cfg.fzf.command;
         let mut child = Command::new(fzf)
             .args(args)
@@ -1960,11 +2181,7 @@ impl App {
                 }
             }
             command => {
-                let child = Command::new("sh")
-                    .arg("-c")
-                    .arg(command)
-                    .stdin(Stdio::piped())
-                    .spawn();
+                let child = Command::new("sh").arg("-c").arg(command).stdin(Stdio::piped()).spawn();
                 if let Ok(mut child) = child {
                     if let Some(mut w) = child.stdin.take() {
                         let _ = w.write_all(text.as_bytes());
@@ -2021,7 +2238,10 @@ fn base64(bytes: &[u8]) -> String {
     const TABLE: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);
     for chunk in bytes.chunks(3) {
-        let n = chunk.iter().enumerate().fold(0u32, |n, (i, &b)| n | u32::from(b) << (16 - 8 * i));
+        let n = chunk
+            .iter()
+            .enumerate()
+            .fold(0u32, |n, (i, &b)| n | u32::from(b) << (16 - 8 * i));
         for i in 0..4 {
             if i <= chunk.len() {
                 out.push(TABLE[(n >> (18 - 6 * i) & 63) as usize] as char);
@@ -2122,12 +2342,14 @@ impl View {
     /// The view in words, as the prompt shows it: the order first, then
     /// whatever narrows or divides the list.
     fn encode(&self) -> String {
-        let mut words = vec![match self.sort {
-            Sort::Priority => "priority",
-            Sort::Due => "due",
-            Sort::Added => "added",
-        }
-        .to_string()];
+        let mut words = vec![
+            match self.sort {
+                Sort::Priority => "priority",
+                Sort::Due => "due",
+                Sort::Added => "added",
+            }
+            .to_string(),
+        ];
         if self.reverse {
             words.push("reversed".into());
         }
@@ -2141,7 +2363,10 @@ impl View {
     }
 
     fn decode(inbox: bool, s: &str) -> View {
-        let mut view = View { inbox, ..View::default() };
+        let mut view = View {
+            inbox,
+            ..View::default()
+        };
         let mut words = s.split(", ");
         view.sort = Sort::parse(words.next().unwrap_or(""));
         for w in words {

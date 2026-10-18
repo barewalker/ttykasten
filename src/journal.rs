@@ -148,7 +148,11 @@ mod tests {
         j.record(entry(1, Some("- [ ] a"), "- [x] a")).unwrap();
         j.record(entry(3, None, "added")).unwrap();
         // Another collection's entry is not touched.
-        j.record(Entry { home: "/elsewhere".into(), ..entry(1, Some("x"), "y") }).unwrap();
+        j.record(Entry {
+            home: "/elsewhere".into(),
+            ..entry(1, Some("x"), "y")
+        })
+        .unwrap();
 
         // A blocked note keeps its entry for later.
         assert!(matches!(j.undo(&home, |_| true).unwrap(), Undo::Blocked(_)));

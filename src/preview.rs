@@ -5,8 +5,8 @@
 //! What counts as what follows format.md: headings are `^#+\s` (§8.3), tags
 //! `#[A-Za-z0-9_-]+` (§10), links `[[…]]` (§9.2), ids §9.1.
 
-use crate::{blockid, task};
 use crate::config::Colors;
+use crate::{blockid, task};
 
 const RESET: &str = "\x1b[0m";
 
@@ -32,7 +32,13 @@ struct Palette {
 
 impl Palette {
     fn new(c: &Colors) -> Self {
-        let sgr = |p: &str| if p.is_empty() { String::new() } else { format!("\x1b[{p}m") };
+        let sgr = |p: &str| {
+            if p.is_empty() {
+                String::new()
+            } else {
+                format!("\x1b[{p}m")
+            }
+        };
         Palette {
             seqs: [
                 sgr(&c.dim),
@@ -103,11 +109,7 @@ fn frontmatter_end<S: AsRef<str>>(lines: &[S]) -> Option<usize> {
     if lines.first()?.as_ref() != "---" {
         return None;
     }
-    lines
-        .iter()
-        .skip(1)
-        .position(|l| l.as_ref() == "---")
-        .map(|p| p + 1)
+    lines.iter().skip(1).position(|l| l.as_ref() == "---").map(|p| p + 1)
 }
 
 /// For a line starting with ```` ``` ```` or `~~~`, the character and the run length.
@@ -273,7 +275,18 @@ mod tests {
         let out = render(&lines, &Colors::default(), None);
         assert_eq!(plain(&out), lines.join("\n") + "\n");
         // Empty colours produce no escape sequences.
-        let none = Colors { heading: String::new(), tag: String::new(), link: String::new(), open: String::new(), done: String::new(), priority: String::new(), due: String::new(), dim: String::new(), cancelled: String::new(), mark: String::new() };
+        let none = Colors {
+            heading: String::new(),
+            tag: String::new(),
+            link: String::new(),
+            open: String::new(),
+            done: String::new(),
+            priority: String::new(),
+            due: String::new(),
+            dim: String::new(),
+            cancelled: String::new(),
+            mark: String::new(),
+        };
         let out = render(&lines, &none, None);
         assert!(!out.contains('\x1b'));
         assert_eq!(plain(&out), lines.join("\n") + "\n");

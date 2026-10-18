@@ -47,9 +47,8 @@ pub fn unstrike(text: &str) -> &str {
     }
 }
 
-static DONE_STAMP: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"[ \t\n\x0B\x0C\r]*done:[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}").unwrap()
-});
+static DONE_STAMP: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"[ \t\n\x0B\x0C\r]*done:[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}").unwrap());
 static CANCEL_STAMP: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"[ \t\n\x0B\x0C\r]*cancelled:[0-9]{4}-[0-9]{2}-[0-9]{2}").unwrap());
 static DUE: LazyLock<Regex> =
@@ -192,7 +191,9 @@ pub fn due_line(line: &str, date: &str) -> Result<String, Refusal> {
 pub fn valid_due(s: &str) -> bool {
     let shape = |s: &str, pat: &str| {
         s.len() == pat.len()
-            && s.bytes().zip(pat.bytes()).all(|(c, p)| if p == b'9' { c.is_ascii_digit() } else { c == p })
+            && s.bytes()
+                .zip(pat.bytes())
+                .all(|(c, p)| if p == b'9' { c.is_ascii_digit() } else { c == p })
     };
     shape(s, "9999-99-99") || shape(s, "9999-99-99T99:99")
 }
@@ -239,7 +240,10 @@ pub fn resolve_due(spec: &str, today: NaiveDate) -> Option<String> {
         "thu" | "thursday" => Some(4),
         "fri" | "friday" => Some(5),
         "sat" | "saturday" => Some(6),
-        _ => ["日", "月", "火", "水", "木", "金", "土"].iter().position(|d| *d == spec).map(|p| p as i64),
+        _ => ["日", "月", "火", "水", "木", "金", "土"]
+            .iter()
+            .position(|d| *d == spec)
+            .map(|p| p as i64),
     };
     let wd = weekday?;
     let today_wd = i64::from(today.weekday().num_days_from_sunday());
@@ -304,8 +308,7 @@ pub fn capture(cfg: &Config, path: &Path, text: &str, due: Option<&str>) -> io::
         .on_capture
         .then(|| blockid::mint(&blockid::ids_in(&lines), cfg.block_id.length, &cfg.block_id.alphabet));
     let checkbox = &cfg.tasks.new_checkbox;
-    let Some(line) = new_task_line(checkbox, text, cfg.tasks.require_tag.as_deref(), due, id.as_deref())
-    else {
+    let Some(line) = new_task_line(checkbox, text, cfg.tasks.require_tag.as_deref(), due, id.as_deref()) else {
         return Ok(None);
     };
     lines.push(line.clone());
@@ -331,7 +334,10 @@ mod tests {
             toggle_line("- [ ] draft #todo ^t3k9aa", now).unwrap(),
             "- [x] draft #todo done:2026-09-29 14:05 ^t3k9aa"
         );
-        assert_eq!(toggle_line("- [x] foo done:2026-07-17 10:00", now).unwrap(), "- [ ] foo");
+        assert_eq!(
+            toggle_line("- [x] foo done:2026-07-17 10:00", now).unwrap(),
+            "- [ ] foo"
+        );
         assert_eq!(toggle_line("  * [X] foo", now).unwrap(), "  * [ ] foo");
         assert_eq!(toggle_line("- [-] ~~foo~~", now), Err(Refusal::Cancelled));
         assert_eq!(toggle_line("plain", now), Err(Refusal::NoCheckbox));
@@ -344,7 +350,10 @@ mod tests {
             cancel_line("- [ ] (A) #projectx check #todo due:2026-09-14 ^a1b2c3", today).unwrap(),
             "- [-] (A) ~~#projectx check #todo due:2026-09-14~~ cancelled:2026-09-16 ^a1b2c3"
         );
-        assert_eq!(cancel_line("- [-] (A) ~~foo~~ cancelled:2026-07-17", today).unwrap(), "- [ ] (A) foo");
+        assert_eq!(
+            cancel_line("- [-] (A) ~~foo~~ cancelled:2026-07-17", today).unwrap(),
+            "- [ ] (A) foo"
+        );
         assert_eq!(cancel_line("- [x] foo", today), Err(Refusal::Done));
         assert_eq!(cancel_line("- [X] foo", today), Err(Refusal::Done));
         assert_eq!(cancel_line("- [ ]   ", today), Err(Refusal::NoCheckbox));
@@ -357,7 +366,10 @@ mod tests {
         assert_eq!(t("  - buy milk").unwrap(), "  - [ ] buy milk #todo");
         assert_eq!(t("1. buy milk").unwrap(), "- [ ] 1. buy milk #todo");
         assert_eq!(t("- [ ] foo ^abc123").unwrap(), "- [ ] foo #todo ^abc123");
-        assert_eq!(t("- [-] ~~foo~~ cancelled:2026-07-17").unwrap(), "- [-] ~~foo~~ cancelled:2026-07-17 #todo");
+        assert_eq!(
+            t("- [-] ~~foo~~ cancelled:2026-07-17").unwrap(),
+            "- [-] ~~foo~~ cancelled:2026-07-17 #todo"
+        );
         assert_eq!(t("- [ ] foo #todo"), Err(Refusal::NothingToTag));
         assert_eq!(t("   "), Err(Refusal::NothingToTag));
     }
@@ -373,7 +385,10 @@ mod tests {
         assert_eq!(due_line("- [x] foo", "2026-07-24"), Err(Refusal::NotOpen));
         assert_eq!(due_line("- [X] foo", "2026-07-24"), Err(Refusal::NotOpen));
         assert_eq!(due_line("- [ ] foo", "2026-07-24 10:00"), Err(Refusal::BadDate));
-        assert_eq!(due_line("- [ ] foo", "2026-07-24T10:00").unwrap(), "- [ ] foo due:2026-07-24T10:00");
+        assert_eq!(
+            due_line("- [ ] foo", "2026-07-24T10:00").unwrap(),
+            "- [ ] foo due:2026-07-24T10:00"
+        );
     }
 
     #[test]
@@ -428,9 +443,15 @@ mod tests {
             line("  call Acme back ", Some("2026-10-02"), Some("a1b2c3")).as_deref(),
             Some("- [ ] call Acme back #todo due:2026-10-02 ^a1b2c3")
         );
-        assert_eq!(line("#todo foo", None, Some("abc123")).as_deref(), Some("- [ ] #todo foo ^abc123"));
+        assert_eq!(
+            line("#todo foo", None, Some("abc123")).as_deref(),
+            Some("- [ ] #todo foo ^abc123")
+        );
         // with_block_id removes an id typed into the text.
-        assert_eq!(line("foo ^zzz999", None, Some("abc123")).as_deref(), Some("- [ ] foo #todo ^abc123"));
+        assert_eq!(
+            line("foo ^zzz999", None, Some("abc123")).as_deref(),
+            Some("- [ ] foo #todo ^abc123")
+        );
         // `#todo-x` is another tag, so #todo is added (Q8).
         assert_eq!(
             line("#todo-x foo", None, Some("abc123")).as_deref(),
@@ -438,7 +459,10 @@ mod tests {
         );
         assert_eq!(line(" \t", None, Some("abc123")), None);
         // The plugin's defaults: no tag and no id.
-        assert_eq!(new_task_line("- [ ] ", " foo ", None, None, None).as_deref(), Some("- [ ] foo"));
+        assert_eq!(
+            new_task_line("- [ ] ", " foo ", None, None, None).as_deref(),
+            Some("- [ ] foo")
+        );
     }
 
     fn user_config() -> Config {
