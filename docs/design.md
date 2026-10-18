@@ -237,3 +237,18 @@ on every start, so changes need no rebuild.
 - Checked against the plugin's span and rows with a fake gcalcli: three
   specs, identical.
 
+2026-10-18 (evening): `doctor` (the plugin's :checkhealth).
+
+- Reads the config itself, so a config that does not parse is reported
+  (with the checks run on the defaults) instead of stopping the run.
+- Checks: the config file and unknown settings, home and its note count,
+  fzf (0.46 or newer, for `transform` and $FZF_PROMPT), rg, the editor, the
+  pager and clipboard commands, the templates, the task regexes, the
+  capture note and `always`, the menu (unknown actions, items with neither
+  action nor command, a key used twice), the swap directory, the calendar
+  (gcalcli, its token's permissions, the names) and the romaji search
+  (prefix, and the time one query takes, which is the typing latency).
+- Exits 1 when it found an error. Its sentences are kept in the module in
+  both languages rather than in the message tables, since nothing else
+  uses them.
+

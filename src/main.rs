@@ -50,6 +50,9 @@ fn run() -> Result<()> {
         println!("{}", version());
         return Ok(());
     }
+    if cmd == "doctor" {
+        return doctor(std::io::stdout().is_terminal());
+    }
     if cmd == "config-example" {
         print!("{}", config::EXAMPLE);
         return Ok(());
@@ -2534,6 +2537,39 @@ fn key_hint(hint: &str, key: &str) -> String {
         String::new()
     } else {
         fill(hint, &[&key])
+    }
+}
+
+/// `ttykasten doctor`: prints the report, coloured on a terminal, and fails
+/// when it found an error.
+fn doctor(colour: bool) -> Result<()> {
+    use ttykasten::doctor::Level;
+    let report = ttykasten::doctor::check();
+    let paint = |code: &str, s: &str| {
+        if colour {
+            format!("\x1b[{code}m{s}\x1b[0m")
+        } else {
+            s.to_string()
+        }
+    };
+    for (title, findings) in &report.sections {
+        println!("{}", paint("1", title));
+        for f in findings {
+            let mark = match f.level {
+                Level::Ok => paint("32", "ok   "),
+                Level::Info => paint("2", "-    "),
+                Level::Warn => paint("33", "WARN "),
+                Level::Error => paint("31", "ERROR"),
+            };
+            println!("  {mark} {}", f.text);
+            for line in f.advice.iter().flat_map(|a| a.lines()) {
+                println!("        {line}");
+            }
+        }
+    }
+    match report.errors() {
+        0 => Ok(()),
+        n => bail!("{n} error(s)"),
     }
 }
 

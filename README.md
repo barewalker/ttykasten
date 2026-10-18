@@ -66,6 +66,7 @@ cargo install --git https://github.com/barewalker/ttykasten
 | `hubs` | notes by how many links meet there |
 | `backlinks` | pick a line and list the lines linking to it (or, for a line with no id, to its note); open one at its line |
 | `config-example` | print an example config file |
+| `doctor` | check the setup and say what each problem costs: the config file (and unknown settings), home, fzf (0.46 or newer), rg, the editor, templates, the capture note, the menu, the calendar and the romaji search's speed |
 | `--version` | print the version and the commit it was built from |
 
 Leave out `TEXT` or `TITLE` to type it into an input line.

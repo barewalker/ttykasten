@@ -160,6 +160,7 @@ Usage: ttykasten [ACTION] [ARG…]
   find            find a note and open it
   new [TITLE]     create a note from the template
   log             list daily and weekly notes (log.date_key: pick a date)
+  doctor          check the setup: config, home, fzf, rg, templates, calendar, romaji
   link            pick a line of any note; copy a link to it ([[note#^id]])
   link-daily      the same, and write the link into today's daily note
   backlinks       pick a line (or note) and list the lines linking to it
@@ -316,6 +317,7 @@ const JA: Msgs = Msgs {
   find            ノートを探して開く
   new [題名]      雛形から新しいノートを作る
   log             日誌と週まとめの一覧 (log.date_key で日付を指定)
+  doctor          設定を点検する: 設定ファイル、home、fzf、rg、テンプレート、カレンダー、ローマ字
   link            ノートの行を選び、その行へのリンク ([[note#^id]]) をコピーする
   link-daily      同じく、リンクを今日の日誌にも書く
   backlinks       行 (かノート) を選び、そこへリンクしている行を一覧する

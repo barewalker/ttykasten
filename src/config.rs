@@ -796,7 +796,8 @@ impl Config {
     }
 }
 
-fn expand_tilde(p: &str) -> Result<PathBuf> {
+/// `~/x` as a path under $HOME; anything else as it is.
+pub fn expand_tilde(p: &str) -> Result<PathBuf> {
     match p.strip_prefix("~/") {
         Some(rest) => {
             let home = env::var_os("HOME").context("HOME")?;

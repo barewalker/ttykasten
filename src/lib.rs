@@ -7,6 +7,7 @@ pub mod blockid;
 pub mod calendar;
 pub mod command;
 pub mod config;
+pub mod doctor;
 pub mod fileio;
 pub mod graph;
 pub mod i18n;
