@@ -258,3 +258,22 @@ on every start, so changes need no rebuild.
 - Tried in a real fzf, driven through tmux: the romaji query and back, the
   tag chooser, every view key, done and undo.
 
+2026-10-18 (night): notes in plain Vim or Neovim (`contrib/ttykasten.vim`).
+
+- ttykasten offers commands an editor can call: `--print` (what would open
+  in the editor is printed as `PATH<tab>LINE`, links printed instead of
+  copied), `keys` (the menu's keys), `link-at FILE COL` (the plugin's
+  follow_link: the link under a column, its note, the `^id` line or the
+  heading it names; `follow_link.create_nonexisting` as in the plugin) and
+  `toggle`, `cancel`, `tag-line`, `due` on FILE LINE.
+- The Vim script maps `<leader>` + every menu key, and in markdown buffers
+  gf and the line's task actions. fzf runs with `:!` in Vim and in a
+  terminal tab in Neovim (whose `:!` has no terminal); the answer comes
+  back through a temporary file.
+- `insert-link` (the plugin's insert_link): pick a note, get `[[note]]`.
+- The swap guard also reads Vim's default swap beside the note
+  (`.note.md.swp`); Vim's block 0 is the same as Neovim's.
+- Tried in `nvim --clean` through tmux: gf (id, duplicate names, missing
+  note), each line action, insert-link, a menu key, the menu, the digest.
+  Plain Vim is not installed here, so its `:!` path is untried.
+

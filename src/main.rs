@@ -38,10 +38,18 @@ struct App {
     cfg: Config,
     home: PathBuf,
     msg: &'static Msgs,
+    /// `--print`: what would open in the editor is printed as `PATH\tLINE`
+    /// instead, and links are printed rather than copied, for an editor
+    /// that runs ttykasten and acts on the answer.
+    print: bool,
 }
 
 fn run() -> Result<()> {
-    let args: Vec<String> = env::args().skip(1).collect();
+    let mut args: Vec<String> = env::args().skip(1).collect();
+    let print = args.first().is_some_and(|a| a == "--print");
+    if print {
+        args.remove(0);
+    }
     let (cmd, rest) = match args.split_first() {
         Some((c, r)) => (c.as_str(), r),
         None => ("", &[][..]),
@@ -64,7 +72,7 @@ fn run() -> Result<()> {
         return Ok(());
     }
     let home = cfg.home()?;
-    let app = App { cfg, home, msg };
+    let app = App { cfg, home, msg, print };
     if cmd == "preview" {
         // Called by fzf as `preview FILE [LINE]`, so the arguments stay apart.
         let line = rest.get(1).and_then(|l| l.parse::<usize>().ok());
@@ -81,6 +89,10 @@ fn run() -> Result<()> {
         "task-due" => return app.task_due(rest),
         "task-tag-filter" => return app.task_tag_filter(rest),
         "task-search" => return app.task_search(rest),
+        // Called by an editor, about the line it is on.
+        "keys" => return app.keys(),
+        "link-at" => return app.link_at(rest),
+        "toggle" | "cancel" | "tag-line" | "due" => return app.line_action(cmd, rest),
         "task-capture" => {
             let message = app.capture_guided()?.unwrap_or_default();
             app.set_status(&message);
@@ -128,6 +140,7 @@ impl App {
             "dead-links" => self.dead_links(),
             "hubs" => self.hubs(),
             "link" => self.link(),
+            "insert-link" => self.insert_link(),
             "link-daily" => self.link_daily(),
             "backlinks" => self.backlinks(),
             _ => {
@@ -361,12 +374,29 @@ impl App {
     /// with `/` is turned into a regex by `ttyskk migemo` and matched against
     /// each note's path and headings instead.
     fn find(&self) -> Result<()> {
+        match self.pick_note_path(self.msg.prompt_find)? {
+            Some(rel) => self.edit(&self.home.join(rel)),
+            None => Ok(()),
+        }
+    }
+
+    /// InsertLink: picks a note as `find` does and prints `[[name]]` (and
+    /// copies it, unless printing for an editor).
+    fn insert_link(&self) -> Result<()> {
+        let Some(rel) = self.pick_note_path(self.msg.prompt_insert_link)? else {
+            return Ok(());
+        };
+        let link = format!("[[{}]]", link::note_name(Path::new(&rel)));
+        self.copy(&link);
+        println!("{link}");
+        Ok(())
+    }
+
+    /// A note picked by path (with romaji, see `find`), relative to home.
+    fn pick_note_path(&self, prompt: &str) -> Result<Option<String>> {
         let files = self.note_files("--no-ignore-vcs")?;
         let items: String = files.iter().map(|f| format!("{f}\n")).collect();
-        let mut args = vec![
-            "--scheme=path".to_string(),
-            format!("--prompt={}", self.msg.prompt_find),
-        ];
+        let mut args = vec!["--scheme=path".to_string(), format!("--prompt={prompt}")];
         let prefix = self.romaji_prefix()?;
         let index = if prefix.is_some() && romaji::available(&self.cfg.romaji) {
             Some(self.write_find_index(&files)?)
@@ -390,10 +420,7 @@ impl App {
         if let Some(index) = &index {
             let _ = fs::remove_file(index);
         }
-        match out?.as_ref().and_then(|o| o.first()) {
-            Some(rel) if !rel.is_empty() => self.edit(&self.home.join(rel)),
-            _ => Ok(()),
-        }
+        Ok(out?.and_then(|o| o.into_iter().next()).filter(|rel| !rel.is_empty()))
     }
 
     /// The romaji index for `find`: each note's path, then its path and
@@ -1394,6 +1421,151 @@ impl App {
         }
     }
 
+    /// `keys`: the menu's keys, one per line, for an editor to map
+    /// (`ttykasten KEY` runs the item).
+    fn keys(&self) -> Result<()> {
+        for item in self.cfg.menu.items() {
+            if let Some(k) = item.key.filter(|k| !k.is_empty()) {
+                println!("{k}");
+            }
+        }
+        Ok(())
+    }
+
+    /// `link-at FILE COL`, with the line on stdin: where the `[[link]]` at
+    /// byte column COL (1-based) of a line of FILE points, as `PATH\tLINE`,
+    /// one line per note when several share the name. Exit status 2: no
+    /// link there; 1: no such note (unless follow_link.create_nonexisting
+    /// makes it).
+    fn link_at(&self, args: &[String]) -> Result<()> {
+        let file = PathBuf::from(args.first().map_or("", String::as_str));
+        let col: usize = args.get(1).and_then(|c| c.parse().ok()).unwrap_or(1);
+        let mut line = String::new();
+        std::io::Read::read_to_string(&mut std::io::stdin(), &mut line)?;
+        let line = line.strip_suffix('\n').unwrap_or(&line);
+        let Some(inner) = link::link_at(line, col) else {
+            std::process::exit(2);
+        };
+        let l = link::split(inner, &self.cfg.extension);
+        let targets: Vec<PathBuf> = if l.name.is_empty() {
+            vec![file.clone()]
+        } else {
+            self.resolve_note(l.name, l.dir)?
+        };
+        if targets.is_empty() {
+            let fl = &self.cfg.follow_link;
+            if !fl.create_nonexisting {
+                bail!(fill(self.msg.no_such_note, &[&l.name]));
+            }
+            let path = self.create_note_for_link(l.name)?;
+            println!("{}\t1", path.display());
+            return Ok(());
+        }
+        for path in targets {
+            let lines = fileio::read_lines(&path).unwrap_or_default();
+            let at = l.anchor.and_then(|a| link::anchor_line(&lines, a)).unwrap_or(1);
+            println!("{}\t{at}", path.display());
+        }
+        Ok(())
+    }
+
+    /// The notes called `name` (the file name without extension), anywhere
+    /// under home; with several, those in `dir` when the link names one.
+    fn resolve_note(&self, name: &str, dir: Option<&str>) -> Result<Vec<PathBuf>> {
+        let ext = format!(".{}", self.cfg.extension);
+        let matches: Vec<String> = self
+            .note_files("--no-ignore-vcs")?
+            .into_iter()
+            .filter(|rel| rel.rsplit('/').next().and_then(|f| f.strip_suffix(&ext)) == Some(name))
+            .collect();
+        let in_dir: Vec<&String> = match dir.filter(|d| !d.is_empty()) {
+            Some(d) if matches.len() > 1 => matches
+                .iter()
+                .filter(|rel| {
+                    rel.rsplit_once('/')
+                        .is_some_and(|(parent, _)| parent == d || parent.ends_with(&format!("/{d}")))
+                })
+                .collect(),
+            _ => Vec::new(),
+        };
+        let chosen: Vec<&String> = if in_dir.is_empty() {
+            matches.iter().collect()
+        } else {
+            in_dir
+        };
+        Ok(chosen.into_iter().map(|rel| self.home.join(rel)).collect())
+    }
+
+    /// A note for a link that points nowhere, in home, from
+    /// follow_link.new_note_template (else new_note_template). The file
+    /// name is cleaned as a new note's is; the template sees the name as
+    /// the link wrote it.
+    fn create_note_for_link(&self, name: &str) -> Result<PathBuf> {
+        let Some(file_name) = note::sanitize_filename(name).filter(|f| !f.is_empty()) else {
+            bail!(fill(self.msg.no_file_name, &[&name]));
+        };
+        let path = self.home.join(format!("{file_name}.{}", self.cfg.extension));
+        if !path.exists() {
+            let template = self
+                .cfg
+                .follow_link
+                .new_note_template
+                .as_deref()
+                .or(self.cfg.new_note_template.as_deref());
+            let now = now();
+            let text = match template {
+                Some(t) => template::load(&self.home, &self.cfg.hdate_format, t, name, now, &|k| {
+                    self.agenda(k, now)
+                }),
+                None => format!("# {name}"),
+            };
+            let lines: Vec<String> = text.split('\n').map(str::to_string).collect();
+            fileio::write_lines(&path, &lines).with_context(|| fill(self.msg.cannot_write, &[&path.display()]))?;
+        }
+        Ok(path)
+    }
+
+    /// `toggle|cancel|tag-line|due FILE LINE [SPEC]`, from an editor about
+    /// the line it is on: the task actions of the list, on that line as it
+    /// is on disk now (the editor saves first). `due` asks for the date
+    /// when SPEC is left out.
+    fn line_action(&self, action: &str, args: &[String]) -> Result<()> {
+        let path = PathBuf::from(args.first().map_or("", String::as_str));
+        let lineno: usize = args.get(1).and_then(|l| l.parse().ok()).context("LINE")?;
+        let real = fs::canonicalize(&path).with_context(|| path.display().to_string())?;
+        let home = fs::canonicalize(&self.home).unwrap_or_else(|_| self.home.clone());
+        let Ok(rel) = real.strip_prefix(&home).map(|r| r.to_string_lossy().into_owned()) else {
+            bail!(fill(self.msg.not_in_home, &[&path.display(), &self.home.display()]));
+        };
+        let lines = fileio::read_lines(&real)?;
+        let Some(line) = lines.get(lineno.wrapping_sub(1)).cloned() else {
+            bail!(self.msg.no_selection);
+        };
+        let hash = tasks::line_hash(&line);
+        let outcome = match action {
+            "tag-line" => return self.tag_picked(vec![(rel, lineno - 1, line)]),
+            "due" => {
+                let spec = match args.get(2) {
+                    Some(s) => s.clone(),
+                    None => match self.input(self.msg.prompt_due)? {
+                        Some(s) => s,
+                        None => return Ok(()),
+                    },
+                };
+                self.set_due(&rel, lineno, &hash, &spec)?
+            }
+            "toggle" => self.rewrite_listed(&rel, lineno, &hash, |l| task::toggle_line(l, now()))?,
+            _ => self.rewrite_listed(&rel, lineno, &hash, |l| task::cancel_line(l, now().date()))?,
+        };
+        match outcome {
+            Ok(m) => {
+                println!("{m}");
+                Ok(())
+            }
+            Err(m) => bail!(m),
+        }
+    }
+
     /// `task-due REL LINENO HASH [SPEC]`, run by fzf's `execute`: asks for a due
     /// date and sets it (TaskDue). The outcome goes to the status file, which
     /// the list's refresh shows.
@@ -1541,13 +1713,22 @@ impl App {
     /// TaskTag over picked lines (tab marks several): each scannable line is
     /// made a task carrying `require_tag`, with a new id when `on_tag`.
     fn tag_lines(&self) -> Result<()> {
-        let Some(tag) = self.cfg.tasks.require_tag.clone() else {
+        if self.cfg.tasks.require_tag.is_none() {
             bail!(self.msg.no_require_tag);
-        };
+        }
         let picked = self.pick_lines(self.msg.prompt_line, true)?;
         if picked.is_empty() {
             return Ok(());
         }
+        self.tag_picked(picked)
+    }
+
+    /// TaskTag on lines given as (path relative to home, index, the line as
+    /// it was read), each refused if the note has changed since.
+    fn tag_picked(&self, picked: Vec<(String, usize, String)>) -> Result<()> {
+        let Some(tag) = self.cfg.tasks.require_tag.clone() else {
+            bail!(self.msg.no_require_tag);
+        };
         let scanner =
             Scanner::new(&self.cfg).map_err(|e| anyhow!(fill(self.msg.bad_pattern, &[&"tasks.headings", &e])))?;
         let mut by_note: Vec<(String, Vec<(usize, String)>)> = Vec::new();
@@ -2356,6 +2537,10 @@ impl App {
     /// works over ssh and mosh), "none" does nothing, and anything else is a
     /// command that reads the text on stdin. A failure only costs the copy.
     fn copy(&self, text: &str) {
+        if self.print {
+            // The caller prints it; the editor takes it from there.
+            return;
+        }
         match self.cfg.clipboard.as_str() {
             "none" | "" => {}
             "osc52" => {
@@ -2378,6 +2563,10 @@ impl App {
 
     /// Opens a file in the editor at a line (1-based), using `editor_line`.
     fn edit_at(&self, path: &Path, line: usize) -> Result<()> {
+        if self.print {
+            println!("{}\t{line}", path.display());
+            return Ok(());
+        }
         if self.cfg.editor_line.is_empty() {
             return self.edit(path);
         }
@@ -2387,6 +2576,10 @@ impl App {
 
     /// Opens a file in the editor.
     fn edit(&self, path: &Path) -> Result<()> {
+        if self.print {
+            println!("{}\t1", path.display());
+            return Ok(());
+        }
         let editor = self.cfg.editor();
         self.shell(&format!("{editor} \"$@\""), &[path])
     }

@@ -43,6 +43,7 @@ pub struct Config {
     /// mosh), "none", or a command that reads the link on stdin (e.g. "wl-copy").
     pub clipboard: String,
     pub notes: Notes,
+    pub follow_link: FollowLink,
     pub tasks: Tasks,
     pub block_id: BlockId,
     pub log: Log,
@@ -74,6 +75,7 @@ impl Default for Config {
             nvim_swap_dir: None,
             clipboard: "osc52".into(),
             notes: Notes::default(),
+            follow_link: FollowLink::default(),
             tasks: Tasks::default(),
             block_id: BlockId::default(),
             log: Log::default(),
@@ -89,6 +91,16 @@ impl Default for Config {
             pager: "less -R".into(),
         }
     }
+}
+
+/// Following a link from an editor (`link-at`).
+#[derive(Debug, Default, Deserialize)]
+#[serde(default)]
+pub struct FollowLink {
+    /// Make the note when a link names one that does not exist, in home.
+    pub create_nonexisting: bool,
+    /// Its template; unset: new_note_template.
+    pub new_note_template: Option<String>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -376,6 +388,7 @@ pub const ACTIONS: &[&str] = &[
     "new",
     "log",
     "link",
+    "insert-link",
     "link-daily",
     "backlinks",
 ];

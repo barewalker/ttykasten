@@ -28,6 +28,42 @@ pub fn links_in(line: &str) -> Vec<&str> {
     out
 }
 
+/// The inside of the `[[…]]` that byte column `col` (1-based) of `line`
+/// falls in, brackets included (the plugin's `link_under_cursor`).
+pub fn link_at(line: &str, col: usize) -> Option<&str> {
+    let mut from = 0;
+    while let Some(open) = line[from..].find("[[").map(|i| from + i) {
+        let close = line[open + 2..].find("]]").map(|i| open + 2 + i)?;
+        let (s, e) = (open + 1, close + 2);
+        if (s..=e).contains(&col) {
+            return Some(&line[open + 2..close]);
+        }
+        from = close + 2;
+    }
+    None
+}
+
+/// The line (1-based) an anchor names in a note: the line whose `^id` it is
+/// for `^id`, else the first heading whose text matches it, ignoring case.
+pub fn anchor_line(lines: &[String], anchor: &str) -> Option<usize> {
+    let anchor = crate::trim(anchor);
+    if let Some(id) = anchor.strip_prefix('^').filter(|id| !id.is_empty()) {
+        return lines
+            .iter()
+            .position(|l| crate::blockid::read(l) == Some(id))
+            .map(|i| i + 1);
+    }
+    let wanted = anchor.to_lowercase();
+    lines
+        .iter()
+        .position(|l| {
+            let hashes = l.bytes().take_while(|&b| b == b'#').count();
+            let rest = &l[hashes..];
+            hashes > 0 && rest.bytes().next().is_some_and(crate::is_ws) && crate::trim(rest).to_lowercase() == wanted
+        })
+        .map(|i| i + 1)
+}
+
 /// Splits a link's inside: alias at the first `|`, anchor at the first `#`,
 /// directory before the last `/`, and a trailing `.<extension>` dropped.
 pub fn split<'a>(inner: &'a str, extension: &str) -> Link<'a> {
@@ -342,5 +378,23 @@ mod tests {
         assert_ne!(id, "t3k9aa");
         let with_alias = block_link(&l, 1, "meeting", 6, ALPHA, Some(Some(40))).unwrap();
         assert_eq!(with_alias.link, "[[meeting#^t3k9aa|draft]]");
+    }
+
+    #[test]
+    fn link_under_a_column_and_anchors() {
+        let line = "see [[a#^x1]] and [[b|B]]";
+        assert_eq!(link_at(line, 5), Some("a#^x1"));
+        assert_eq!(link_at(line, 13), Some("a#^x1"));
+        assert_eq!(link_at(line, 14), None);
+        assert_eq!(link_at(line, 20), Some("b|B"));
+        assert_eq!(link_at("[[open", 2), None);
+        let lines: Vec<String> = ["# Top", "text ^x1", "## Results  ", "#nottitle"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        assert_eq!(anchor_line(&lines, "^x1"), Some(2));
+        assert_eq!(anchor_line(&lines, "results"), Some(3));
+        assert_eq!(anchor_line(&lines, "nottitle"), None);
+        assert_eq!(anchor_line(&lines, "^zz"), None);
     }
 }

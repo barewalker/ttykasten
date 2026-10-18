@@ -60,6 +60,7 @@ cargo install --git https://github.com/barewalker/ttykasten
 | `log` | list recent daily and weekly notes; `ctrl-x` (`log.date_key`) picks a date |
 | `link` | pick a line of any note; give it a `^id` if it has none; copy `[[note#^id]]` |
 | `link-daily` | the same, and append `- [[note#^id]]` to today's daily note |
+| `insert-link` | pick a note and copy `[[note]]` |
 | `links` | pick a note and see what it is linked with, a few steps deep (→ out, ← in, ↔ both) |
 | `orphans` | notes with no link in or out |
 | `dead-links` | links that no note answers to |
@@ -95,6 +96,32 @@ link through the terminal (OSC 52) by default, so it works over ssh and mosh;
 set `clipboard` to `"none"` or to a command such as `"wl-copy"` to change
 that. Subcommands exist
 so that key bindings (tmux, herdr, shell aliases) can call actions directly.
+
+## In Vim or Neovim, without the plugin
+
+`contrib/ttykasten.vim` makes notes work in plain Vim (8.2 or newer) or
+Neovim with no plugin manager and without fzfkasten.nvim. Copy it to
+`~/.vim/plugin/` or `~/.config/nvim/plugin/`. It maps `<leader>` plus each
+menu key from your config (`<leader>kd` for `key = "kd"`), runs the action
+with fzf in the terminal (a terminal tab in Neovim) and opens what you
+picked. In markdown buffers, about the cursor's line: `gf` follows the
+`[[link]]` under the cursor (to the `^id` line or the heading it names),
+`<leader>kx` done/open, `<leader>kX` cancel, `<leader>kl` due date,
+`<leader>kp` make it a task, `<leader>ki` insert `[[note]]`. The comments at
+the top of the file list the settings.
+
+It talks to ttykasten through commands that any editor can use:
+
+| Command | What it does |
+|---|---|
+| `--print ACTION` | runs the action, but prints `PATH<tab>LINE` instead of opening the editor, and prints links instead of copying them |
+| `keys` | the menu's keys, one per line |
+| `link-at FILE COL` | reads a line on stdin and prints where the `[[link]]` at byte column `COL` points (`PATH<tab>LINE`, a line per note when several share the name); exit 2 when there is no link there, 1 when the note does not exist (`follow_link.create_nonexisting = true` creates it) |
+| `toggle FILE LINE`, `cancel FILE LINE`, `tag-line FILE LINE`, `due FILE LINE [SPEC]` | the task list's actions on that line of the file on disk (save first); they go in the undo journal |
+
+Before writing a note, ttykasten also looks for Vim's swap file beside it
+(`.note.md.swp`), so a note with unsaved changes in Vim is refused as one in
+Neovim is.
 
 ## Configuration
 

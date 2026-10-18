@@ -49,6 +49,11 @@ pager = "less -R"
 # "none", or a command that reads the link on stdin, e.g. "wl-copy".
 clipboard = "osc52"
 
+# Following a [[link]] from an editor (`link-at`, gf in contrib/ttykasten.vim).
+[follow_link]
+create_nonexisting = false  # make the note when the link names none
+# new_note_template = "templates/template_new_note.md"   # unset: new_note_template
+
 [notes.daily]
 dir = "daily"
 format = "%Y-%m-%d"

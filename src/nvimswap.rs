@@ -12,6 +12,9 @@
 //! - byte 1007 (the last byte of the 900-byte file name field): `U` when
 //!   the buffer is modified. Neovim sets it on the first change and clears
 //!   it on `:w`.
+//!
+//! Vim writes the same block, but by default next to the file, as
+//! `.name.swp`; that place is looked at too, whatever the swap directory.
 
 use std::fs;
 use std::io::Read;
@@ -32,7 +35,20 @@ pub fn unsaved_pid(swap_dir: &Path, file: &Path) -> Option<u32> {
             names.push(real);
         }
     }
-    let entries = fs::read_dir(swap_dir).ok()?;
+    // Vim's default: `.name.swp` beside the file.
+    if let (Some(dir), Some(base)) = (file.parent(), file.file_name()) {
+        let name = format!(".{}", base.to_string_lossy());
+        if let Some(pid) = scan(dir, &[name]) {
+            return Some(pid);
+        }
+    }
+    scan(swap_dir, &names)
+}
+
+/// The first swap file in `dir` named `<one of names>.s??` that says its
+/// buffer is modified, by a process that is running.
+fn scan(dir: &Path, names: &[String]) -> Option<u32> {
+    let entries = fs::read_dir(dir).ok()?;
     for entry in entries.flatten() {
         let name = entry.file_name();
         let name = name.to_string_lossy();
@@ -116,6 +132,18 @@ mod tests {
         swap(&dir, Path::new("/notes/a b/plan.md.bak"), "swp", me, true);
         assert_eq!(unsaved_pid(&dir, note), None);
         assert_eq!(unsaved_pid(&dir.join("missing"), note), None);
+
+        // Vim's swap beside the note, whatever the swap directory says.
+        let beside = dir.join("notes");
+        fs::create_dir_all(&beside).unwrap();
+        let vim_note = beside.join("todo.md");
+        let mut block = vec![0u8; 4096];
+        block[..2].copy_from_slice(b"b0");
+        block[24..28].copy_from_slice(&me.to_le_bytes());
+        block[DIRTY_AT] = DIRTY;
+        fs::write(beside.join(".todo.md.swp"), &block).unwrap();
+        assert_eq!(unsaved_pid(&dir.join("missing"), &vim_note), Some(me));
+        assert_eq!(unsaved_pid(&dir.join("missing"), &beside.join("other.md")), None);
         fs::remove_dir_all(&dir).unwrap();
     }
 }

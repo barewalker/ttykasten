@@ -91,6 +91,10 @@ pub struct Msgs {
     pub unsaved_in_nvim: &'static str,
     pub desc_week: &'static str,
     pub desc_agenda: &'static str,
+    pub desc_insert_link: &'static str,
+    pub prompt_insert_link: &'static str,
+    pub no_such_note: &'static str,
+    pub not_in_home: &'static str,
     pub agenda_today: &'static str,
     pub agenda_header: &'static str,
     pub agenda_open_hint: &'static str,
@@ -163,6 +167,7 @@ Usage: ttykasten [ACTION] [ARG…]
   doctor          check the setup: config, home, fzf, rg, templates, calendar, romaji
   link            pick a line of any note; copy a link to it ([[note#^id]])
   link-daily      the same, and write the link into today's daily note
+  insert-link     pick a note and copy [[note]]
   backlinks       pick a line (or note) and list the lines linking to it
   config-example  print an example config file
   --version       print the version and the commit it was built from
@@ -245,9 +250,13 @@ Config: $TTYKASTEN_CONFIG, else $XDG_CONFIG_HOME/ttykasten/config.toml.
     desc_mint_ids: "Give every tagged task in a note an id",
     desc_undo: "Undo the last task edit",
     prompt_note: "note> ",
-    unsaved_in_nvim: "{} has unsaved changes in Neovim (pid {}); save it there first",
+    unsaved_in_nvim: "{} has unsaved changes in Vim or Neovim (pid {}); save it there first",
     desc_week: "This week's notes and their digest",
     desc_agenda: "This week's calendar",
+    desc_insert_link: "Link to a note (copy [[note]])",
+    prompt_insert_link: "link to> ",
+    no_such_note: "no note named {}",
+    not_in_home: "{} is not under home ({})",
     agenda_today: "today",
     agenda_header: "{} to {}{}",
     agenda_open_hint: " · enter daily note",
@@ -320,6 +329,7 @@ const JA: Msgs = Msgs {
   doctor          設定を点検する: 設定ファイル、home、fzf、rg、テンプレート、カレンダー、ローマ字
   link            ノートの行を選び、その行へのリンク ([[note#^id]]) をコピーする
   link-daily      同じく、リンクを今日の日誌にも書く
+  insert-link     ノートを選び、[[ノート]] をコピーする
   backlinks       行 (かノート) を選び、そこへリンクしている行を一覧する
   config-example  設定ファイルの見本を出す
   --version       版と、元にしたコミットを出す
@@ -402,9 +412,13 @@ const JA: Msgs = Msgs {
     desc_mint_ids: "ノートのタスクに id を付ける",
     desc_undo: "直前のタスクの書き換えを戻す",
     prompt_note: "note> ",
-    unsaved_in_nvim: "{} は Neovim で未保存の変更がある (pid {})。先に Neovim で保存してほしい",
+    unsaved_in_nvim: "{} は Vim か Neovim で未保存の変更がある (pid {})。先にそちらで保存してほしい",
     desc_week: "今週のノートと週まとめ",
     desc_agenda: "今週の予定",
+    desc_insert_link: "ノートへのリンク ([[ノート]] をコピー)",
+    prompt_insert_link: "link to> ",
+    no_such_note: "{} という名前のノートはありません",
+    not_in_home: "{} は home ({}) の中にありません",
     agenda_today: "今日",
     agenda_header: "{} 〜 {}{}",
     agenda_open_hint: " · enter その日の日誌",
@@ -475,6 +489,7 @@ impl Msgs {
             "week" => self.desc_week,
             "digest" => self.desc_digest,
             "agenda" => self.desc_agenda,
+            "insert-link" => self.desc_insert_link,
             "grep" => self.desc_grep,
             "tags" => self.desc_tags,
             "recent" => self.desc_recent,
