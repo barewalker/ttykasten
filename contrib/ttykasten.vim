@@ -185,13 +185,21 @@ if get(g:, 'ttykasten_no_maps', 0)
   finish
 endif
 
-for s:key in systemlist(s:cmd . ' keys')
-  if v:shell_error || s:key ==# ''
-    break
+let s:keys = systemlist(s:cmd . ' keys')
+if v:shell_error
+  " Not there, or older than `keys`: say so rather than map nothing quietly.
+  echohl WarningMsg
+  echomsg 'ttykasten.vim: `' . s:cmd . ' keys` failed, so no menu keys are mapped: ' . get(s:keys, 0, '')
+  echohl None
+  let s:keys = []
+endif
+for s:key in s:keys
+  if s:key ==# ''
+    continue
   endif
   execute 'nnoremap <silent> <leader>' . s:key . ' :call <SID>run(' . string(shellescape(s:key)) . ', function("<SID>open"))<CR>'
 endfor
-unlet! s:key
+unlet! s:key s:keys
 
 let s:line_maps = extend({
       \ 'follow': 'gf',
