@@ -812,16 +812,22 @@ pub fn parse(text: &str) -> Result<(Config, Vec<String>)> {
 impl Config {
     /// Where the notes live. $TTYKASTEN_HOME overrides everything (for trying things out).
     pub fn home(&self) -> Result<PathBuf> {
+        self.home_from().0
+    }
+
+    /// The home, and the environment variable it came from, if not `home` (the
+    /// doctor says so: a variable left set in one shell is easily forgotten).
+    pub fn home_from(&self) -> (Result<PathBuf>, Option<&'static str>) {
         if let Some(h) = env::var_os("TTYKASTEN_HOME").filter(|h| !h.is_empty()) {
-            return Ok(PathBuf::from(h));
+            return (Ok(PathBuf::from(h)), Some("TTYKASTEN_HOME"));
         }
         if let Some(h) = &self.home {
-            return expand_tilde(h);
+            return (expand_tilde(h), None);
         }
         if let Some(h) = env::var_os("ZETTELKASTEN_HOME").filter(|h| !h.is_empty()) {
-            return Ok(PathBuf::from(h));
+            return (Ok(PathBuf::from(h)), Some("ZETTELKASTEN_HOME"));
         }
-        expand_tilde("~/notes")
+        (expand_tilde("~/notes"), None)
     }
 
     /// The swap directory to check, or None when checking is off.

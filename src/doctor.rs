@@ -153,11 +153,14 @@ pub fn check() -> Report {
             }
         }
     }
-    let home = cfg.home();
+    let (home, var) = cfg.home_from();
+    let from = var
+        .map(|v| d.say(", from $", ", $") + v + &d.say("", " から"))
+        .unwrap_or_default();
     match &home {
         Ok(h) if h.is_dir() => {
             let n = count_notes(h, &cfg.extension);
-            d.ok(format!("home: {} ({n} .{})", h.display(), cfg.extension));
+            d.ok(format!("home: {} ({n} .{}{from})", h.display(), cfg.extension));
             if n == 0 {
                 d.info(d.say(
                     "No notes there yet, so every list comes up empty.",
@@ -166,7 +169,8 @@ pub fn check() -> Report {
             }
         }
         Ok(h) => {
-            let text = d.say("home is not a directory: ", "home がフォルダではない: ") + &h.display().to_string();
+            let text =
+                d.say("home is not a directory: ", "home がフォルダではない: ") + &h.display().to_string() + &from;
             let advice = vec![d.say(
                 "Nothing is found until it exists. Create it, or set `home`.",
                 "作るか、`home` を設定するまで何も見つかりません。",
