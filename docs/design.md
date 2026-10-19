@@ -305,3 +305,20 @@ on every start, so changes need no rebuild.
 - `menu.rest = true` lists the actions a hand-made menu leaves out after
   its items.
 
+2026-10-19: checked by hand end to end, and 0.5.0.
+
+- Every action was tried on the real collection and on a copy: the menu,
+  tasks, agenda, the note panel, the read-only lists and the Vim script in
+  Vim and Neovim.
+- `doctor` says when home comes from `$TTYKASTEN_HOME` or
+  `$ZETTELKASTEN_HOME`: a variable left set in one shell sent a check to
+  the test copy, and nothing said so.
+- Tags are coloured as soon as a note is drawn: in fzfkasten.nvim for every
+  note under home (`note_buffer.highlight_tags`), and in
+  `contrib/ttykasten.vim` for plain Vim and Neovim. A markdown language
+  server (marksman) colours them only after reading the collection, a
+  second or two after the fresh Neovim that ttykasten starts.
+- `contrib/ttykasten.vim` loads under `vim -u NONE`: it sets Vim's
+  'cpoptions' while it loads, for its line continuations.
+- The README says what a digest source command gets and gives back.
+- format.md Q12 (numbers and URL fragments read as tags) stays open.
