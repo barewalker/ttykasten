@@ -198,8 +198,10 @@ open = "Still open in this week's notes"
 ahead = "Coming up"
 due = "Due"
 unavailable = "unavailable"
-# Extra sections: a shell command run in home, with {from} {to} (the week)
-# and {ahead_from} {ahead_to} replaced. Its output becomes the section.
+# Extra sections: a shell command run in home, with {from} {to} (the
+# week's Monday and Sunday, both included) and {ahead_from} {ahead_to} (the
+# weeks looked ahead to) replaced. What it prints on stdout becomes the
+# section as it is (Markdown is fine); a failure becomes one line saying so.
 # [[week.digest.sources]]
 # label = "Mail"
 # command = "mail-week {from} {to}"

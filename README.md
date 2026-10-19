@@ -177,6 +177,27 @@ TSV) when `[calendar] enabled = true`. Results are cached for 15 minutes,
 and when the command fails an older result is shown, marked with when it
 was fetched.
 
+## Digest sources
+
+The week digest is built from the notes alone (outlines, tasks finished and
+still open, what is due next) plus the calendar when it is enabled. Anything
+else, such as mail or commits, comes from commands you add:
+
+```toml
+[[week.digest.sources]]
+label = "Commits"
+command = "git -C ~/src log --since={from} --until={to} --oneline"
+```
+
+Each command runs through `sh -c` in `home`, with stdin closed. `{from}`
+and `{to}` are the week's Monday and Sunday (`2026-10-12`, `2026-10-18`,
+both included); `{ahead_from}` and `{ahead_to}` are the weeks the digest
+looks ahead to (`week.digest.ahead`). Whatever it prints on stdout becomes a
+`## <label>` section as it is, so it may print Markdown (`###` subsections,
+lists); trailing blank lines are dropped. When it fails, the section is one
+line, `(unavailable: exited N: <first stderr line>)`, and the rest of the
+digest is unaffected. With no sources, there are no such sections.
+
 ## Compatibility
 
 [docs/format.md](docs/format.md) specifies the on-disk format that both tools
