@@ -25,14 +25,23 @@
 "   <leader>kp    turn the line into a task (adds tasks.require_tag)
 "   <leader>ki    insert a link to a note
 "
+" #tags in markdown buffers are coloured (group ttykastenTag, linked to
+" Identifier; g:ttykasten_highlight_tags = 0 turns it off).
+"
 " Settings: g:ttykasten_command (default "ttykasten"), g:ttykasten_no_maps,
-" g:ttykasten_line_maps, g:ttykasten_menu_map. `set autoread` saves a
-" prompt when a list wrote to a note that is open but unchanged here.
+" g:ttykasten_line_maps, g:ttykasten_menu_map, g:ttykasten_highlight_tags.
+" `set autoread` saves a prompt when a list wrote to a note that is open but
+" unchanged here.
 
 if exists('g:loaded_ttykasten')
   finish
 endif
 let g:loaded_ttykasten = 1
+
+" Line continuations need Vim's 'cpoptions', which `vim -u NONE` (Vi
+" compatible) does not have; put the user's back at the end.
+let s:cpo = &cpo
+set cpo&vim
 
 let s:cmd = get(g:, 'ttykasten_command', 'ttykasten')
 
@@ -183,7 +192,29 @@ endfunction
 command! -nargs=* Ttykasten call s:run(<q-args>, function('s:open'))
 command! TtykastenInsertLink call s:run('insert-link', function('s:insert'))
 
+" #tags, which Vim's markdown syntax and Neovim's treesitter leave plain,
+" read as ttykasten reads them. A match belongs to a window, so each window
+" gets one while it shows a markdown buffer.
+highlight default link ttykastenTag Identifier
+
+function! s:tag_match() abort
+  let want = &filetype ==# 'markdown' && get(g:, 'ttykasten_highlight_tags', 1)
+  if want && !exists('w:ttykasten_tag_match')
+    let w:ttykasten_tag_match = matchadd('ttykastenTag', '#[A-Za-z0-9_-]\+')
+  elseif !want && exists('w:ttykasten_tag_match')
+    silent! call matchdelete(w:ttykasten_tag_match)
+    unlet w:ttykasten_tag_match
+  endif
+endfunction
+
+augroup ttykasten_tags
+  autocmd!
+  autocmd BufWinEnter,WinEnter,FileType * call s:tag_match()
+augroup END
+
 if get(g:, 'ttykasten_no_maps', 0)
+  let &cpo = s:cpo
+  unlet s:cpo
   finish
 endif
 
@@ -240,3 +271,6 @@ augroup ttykasten
   autocmd!
   autocmd FileType markdown call s:map_buffer()
 augroup END
+
+let &cpo = s:cpo
+unlet s:cpo

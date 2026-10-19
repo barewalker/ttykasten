@@ -109,8 +109,10 @@ with fzf in the terminal (a terminal tab in Neovim) and opens what you
 picked. In markdown buffers, about the cursor's line: `gf` follows the
 `[[link]]` under the cursor (to the `^id` line or the heading it names),
 `<leader>kx` done/open, `<leader>kX` cancel, `<leader>kl` due date,
-`<leader>kp` make it a task, `<leader>ki` insert `[[note]]`. The comments at
-the top of the file list the settings.
+`<leader>kp` make it a task, `<leader>ki` insert `[[note]]`. `#tags` are
+coloured as soon as a note is drawn. The comments at the top of the file
+list the settings. With fzfkasten.nvim, the plugin colours tags instead
+(`note_buffer.highlight_tags`), in every note however it was opened.
 
 It talks to ttykasten through commands that any editor can use:
 
